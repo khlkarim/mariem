@@ -12,12 +12,24 @@
 
 #define NUM_LINKS 1
 #define NUM_NODES 3
-#define NUM_ENTITIES 1000
 #define MAX_ENTITIES 1000
 
+#define MENU_MARGIN 20
 #define LINK_THICKNESS 8
-#define NODE_BORDER_RESOLUTION 50
+#define DEFAULT_BORDER_RESOLUTION 50
 #define CONSTRAINT_SOLVER_ITERATIONS 2
+
+#define NUM_KEYBOARD_KEYS (GLFW_KEY_LAST + 1)
+static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
+
+#define NUM_MOUSE_BUTTONS (GLFW_MOUSE_BUTTON_LAST + 1)
+static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
+
+void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
+
+#define OFF 0
+#define ON 1
 
 typedef enum Action {
   ACTION_NONE,
@@ -36,18 +48,18 @@ char *actions_labels[ACTION_COUNT] = {
     [ACTION_DELETE_LINK] = "delete a link",
 };
 
+#define NIL 0
+typedef int EntityId;
+
 typedef enum EntityType {
   ENTITY_TYPE_NONE,
   ENTITY_TYPE_NODE,
   ENTITY_TYPE_LINK,
   ENTITY_TYPE_ACTIONS_MENU,
-  ENTITY_TYPE_UI_CONTROLS_LIST,
-  ENTITY_TYPE_UI_CONTROLS_LIST_OPTION,
-  ENTITY_TYPE_UI_CONTROLS_TEXT_INPUT,
+  ENTITY_TYPE_ACTIONS_MENU_OPTION,
+  ENTITY_TYPE_TEXT_INPUT,
   ENTITY_TYPE_COUNT
 } EntityType;
-
-typedef int EntityId;
 
 typedef struct Entity {
   int used;
@@ -81,26 +93,23 @@ typedef struct EntityManager {
   int count;
 } EntityManager;
 
-Entity *create_entity(EntityManager *entityManager);
+EntityId create_entity(EntityManager *entityManager);
 Entity *get_entity(EntityManager *entityManager, EntityId id);
 void delete_entity(EntityManager *entityManager, EntityId id);
-
-/*void create_entities(OuiContext *ouiContext, Entity *entities, int count);
-void update_entities(OuiContext *ouiContext, Entity *entities, int count, float dt);
-void draw_entities(OuiContext *ouiContext, Entity *entities, int count);*/
 
 void create_entities(OuiContext *ouiContext, EntityManager *entityManager);
 void update_entities(OuiContext *ouiContext, EntityManager *entityManager, float dt);
 void draw_entities(OuiContext *ouiContext, EntityManager *entityManager);
 
-NtVec2f get_mouse_position(OuiContext *ouiContext);
-void process_input(OuiContext *ouiContext, Entity *entities, int count, float dt);
-void apply_forces(OuiContext *ouiContext, Entity *entities, int count, float dt);
-void resolve_collisions(OuiContext *ouiContext, Entity *entities, int count, float dt);
+void process_input(OuiContext *ouiContext, EntityManager *entityManager, float dt);
+void apply_forces(OuiContext *ouiContext, EntityManager *entityManager, float dt);
+void resolve_collisions(OuiContext *ouiContext, EntityManager *entityManager, float dt);
 
-void draw_node(OuiContext *ouiContext, Entity *entities, int count, EntityId id);
-void draw_link(OuiContext *ouiContext, Entity *entities, int count, EntityId id);
-void draw_list(OuiContext *ouiContext, Entity *entities, int count, EntityId id);
+void draw_node(OuiContext *ouiContext, EntityManager *entityManager, EntityId id);
+void draw_link(OuiContext *ouiContext, EntityManager *entityManager, EntityId id);
+void draw_menu(OuiContext *ouiContext, EntityManager *entityManager, EntityId id);
+
+NtVec2f get_mouse_position(OuiContext *ouiContext);
 
 int main() {
   srand(time(NULL));
@@ -112,8 +121,13 @@ int main() {
   };
 
   OuiContext *ouiContext = oui_context_create(&ouiConfig);
+  glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
+  glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
+  glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
 
   EntityManager entityManager = {0};
+  entityManager.count = 1;
+
   create_entities(ouiContext, &entityManager);
 
   float prev_t = glfwGetTime(), curr_t, delta_t;
@@ -134,51 +148,65 @@ int main() {
   return 0;
 }
 
-Entity *create_entity(EntityManager *entityManager) {
-  assert(entityManager != NULL && entityManager->count <= MAX_ENTITIES);
-  Entity *e = &(entityManager->entities[0]);
+EntityId create_entity(EntityManager *entityManager) {
+  assert(
+      entityManager != NULL &&
+      entityManager->count >= 1 &&
+      entityManager->count <= MAX_ENTITIES);
 
+  // reserve an empty slot
   for (int i = 1; i < entityManager->count; i++) {
-    e = &(entityManager->entities[i]);
+    Entity *e = &(entityManager->entities[i]);
 
     if (!e->used) {
-      e->used = 1;
-      return e;
+      e->used = ON;
+      return i;
     }
   }
 
+  // create a new slot
   if (entityManager->count < MAX_ENTITIES) {
-    e = &(entityManager->entities[entityManager->count]);
+    Entity *e = &(entityManager->entities[entityManager->count]);
     entityManager->count++;
 
-    e->used = 1;
-    return e;
+    e->used = ON;
+    return entityManager->count - 1;
   }
 
-  return e;
+  // buy more ram
+  return NIL;
 }
 
 Entity *get_entity(EntityManager *entityManager, EntityId id) {
-  assert(entityManager != NULL && entityManager->count <= MAX_ENTITIES);
+  assert(
+      entityManager != NULL &&
+      entityManager->count >= 1 &&
+      entityManager->count <= MAX_ENTITIES);
 
-  if (id < 0 || id >= entityManager->count) {
-    return &(entityManager->entities[0]);
+  if (
+      id <= NIL ||
+      id >= entityManager->count ||
+      !entityManager->entities[id].used) {
+    return &(entityManager->entities[NIL]);
   }
 
   return &(entityManager->entities[id]);
 }
 
 void delete_entity(EntityManager *entityManager, EntityId id) {
-  assert(entityManager != NULL && entityManager->count <= MAX_ENTITIES);
+  assert(
+      entityManager != NULL &&
+      entityManager->count >= 1 &&
+      entityManager->count <= MAX_ENTITIES);
 
-  if (id < 0 || id >= entityManager->count) {
+  if (id <= NIL || id >= entityManager->count) {
     return;
   }
 
-  entityManager->entities[id].used = 0;
+  entityManager->entities[id].used = OFF;
 }
 
-void create_entities(OuiContext *ouiContext, Entity *entities, int count) {
+void create_entities(OuiContext *ouiContext, EntityManager *entityManager) {
   OuiColor colors[3] = {
       {255, 0.0, 0.0, 255},
       {0.0, 255.0, 0.0, 255},
@@ -186,6 +214,7 @@ void create_entities(OuiContext *ouiContext, Entity *entities, int count) {
   };
 
   int numNodes = NUM_NODES, numLinks = NUM_LINKS;
+  EntityId firstNodeId = NIL, secondNodeId = NIL;
 
   int screenWidth = oui_get_window_width(ouiContext);
   int screenHeight = oui_get_window_height(ouiContext);
@@ -195,7 +224,15 @@ void create_entities(OuiContext *ouiContext, Entity *entities, int count) {
   float baseX = -(float)screenWidth / 2, baseY = (float)screenHeight / 2;
 
   for (int i = 0; i < numNodes; i++) {
-    Entity *e = &entities[i];
+    EntityId id = create_entity(entityManager);
+    Entity *e = get_entity(entityManager, id);
+
+    if (i == 0) {
+      firstNodeId = id;
+    }
+    if (i == 1) {
+      secondNodeId = id;
+    }
 
     e->type = ENTITY_TYPE_NODE;
 
@@ -219,60 +256,63 @@ void create_entities(OuiContext *ouiContext, Entity *entities, int count) {
   }
 
   for (int i = numNodes; i - numNodes < numLinks; i++) {
-    Entity *e = &entities[i];
+    EntityId id = create_entity(entityManager);
+    Entity *e = get_entity(entityManager, id);
 
     e->type = ENTITY_TYPE_LINK;
 
     e->elasticity = 0.1;
     e->restLength = 100;
 
-    e->firstChild = 0;
-    entities[e->firstChild].nextSibling = 1;
+    e->firstChild = firstNodeId;
+    entityManager->entities[firstNodeId].nextSibling = secondNodeId;
 
     e->color = (OuiColor){255, 255, 255, 255};
   }
 
   // ui controls
-  int baseIdx = numNodes + numLinks;
-  Entity *userActionList = &(entities[baseIdx]);
+  EntityId actionsMenuId = create_entity(entityManager);
+  Entity *actionsMenu = get_entity(entityManager, actionsMenuId);
 
-  userActionList->type = ENTITY_TYPE_UI_CONTROLS_LIST;
-  userActionList->isVisible = 0;
-  userActionList->radius = 20;
-  userActionList->color.a = 100;
+  actionsMenu->type = ENTITY_TYPE_ACTIONS_MENU;
+  actionsMenu->isVisible = 0;
+  actionsMenu->radius = 20;
+  actionsMenu->color.a = 100;
 
+  Entity *prevMenuItem = get_entity(entityManager, NIL);
   for (Action i = 0; i < ACTION_COUNT; i++) {
-    int currIdx = baseIdx + i + 1;
-    Entity *userActionListOption = &(entities[currIdx]);
+    EntityId menuItemId = create_entity(entityManager);
+    Entity *menuItem = get_entity(entityManager, menuItemId);
 
-    userActionListOption->type = ENTITY_TYPE_UI_CONTROLS_LIST_OPTION;
-    userActionListOption->actions[i] = 1;
+    menuItem->type = ENTITY_TYPE_ACTIONS_MENU_OPTION;
+    menuItem->actions[i] = 1;
 
     if (i == 0) {
-      userActionList->firstChild = currIdx;
+      actionsMenu->firstChild = menuItemId;
+    } else {
+      prevMenuItem->nextSibling = menuItemId;
     }
-    if (i < ACTION_COUNT - 1) {
-      userActionListOption->nextSibling = currIdx + 1;
-    }
+
+    prevMenuItem = menuItem;
   }
 }
 
-void update_entities(OuiContext *ouiContext, Entity *entities, int count, float delta_t) {
-  process_input(ouiContext, entities, count, delta_t);
-  apply_forces(ouiContext, entities, count, delta_t);
-  resolve_collisions(ouiContext, entities, count, delta_t);
+void update_entities(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
+  process_input(ouiContext, entityManager, delta_t);
+  apply_forces(ouiContext, entityManager, delta_t);
+  resolve_collisions(ouiContext, entityManager, delta_t);
 }
 
-void draw_entities(OuiContext *ouiContext, Entity *entities, int count) {
-  for (int i = 0; i < count; i++) {
-    Entity *e = &entities[i];
+void draw_entities(OuiContext *ouiContext, EntityManager *entityManager) {
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
 
     if (e->type == ENTITY_TYPE_NODE) {
-      draw_node(ouiContext, entities, count, i);
+      draw_node(ouiContext, entityManager, i);
     } else if (e->type == ENTITY_TYPE_LINK) {
-      draw_link(ouiContext, entities, count, i);
-    } else if (e->type == ENTITY_TYPE_UI_CONTROLS_LIST) {
-      draw_list(ouiContext, entities, count, i);
+      draw_link(ouiContext, entityManager, i);
+    } else if (e->type == ENTITY_TYPE_ACTIONS_MENU) {
+      draw_menu(ouiContext, entityManager, i);
     }
   }
 }
@@ -291,62 +331,17 @@ NtVec2f get_mouse_position(OuiContext *ouiContext) {
   return mousePos;
 }
 
-Action get_pressed_action(OuiContext *ouiContext, Entity *entities, int count, NtVec2f clickPos) {
-  Entity *e = NULL;
-  for (int i = 0; i < count; i++) {
-    e = &(entities[i]);
-
-    if (e->type == ENTITY_TYPE_UI_CONTROLS_LIST) {
-      break;
-    }
-  }
-
-  int margin = 20;
-  int screenWidth = oui_get_window_width(ouiContext);
-  int screenHeight = oui_get_window_height(ouiContext);
-
-  int baseY = (float)screenHeight / 2 - 100;
-  OuiText optionLabel = {0};
-
-  Entity *listOption = &(entities[e->firstChild]);
-  while (listOption) {
-    optionLabel.startX = -(float)screenWidth / 2 + 2 * margin;
-    optionLabel.startY = baseY;
-    baseY -= 120;
-
-    optionLabel.lineHeight = 48;
-    optionLabel.maxLineWidth = screenWidth - 4 * margin;
-
-    for (Action i = 0; i < ACTION_COUNT && fabs(clickPos.y - optionLabel.startY) < 60; i++) {
-      if (listOption->actions[i]) {
-        return i;
-      }
-    }
-
-    if (listOption->nextSibling == 0) {
-      listOption = NULL;
-    } else {
-      listOption = &(entities[listOption->nextSibling]);
-    }
-  }
-
-  return ACTION_NONE;
-}
-
-void handle_action(Action action) {
-  printf("%s\n", actions_labels[action]);
-}
-
-void process_input(OuiContext *ouiContext, Entity *entities, int count, float delta_t) {
+void process_input(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
   int state;
-  Entity *actionsMenu = NULL;
   NtVec2f mousePos = get_mouse_position(ouiContext);
 
   float minDist = -1;
-  Entity *draggedNode = NULL, *closestNode = NULL;
+  Entity *actionsMenu = get_entity(entityManager, NIL);
+  Entity *draggedNode = get_entity(entityManager, NIL);
+  Entity *closestNode = get_entity(entityManager, NIL);
 
-  for (int i = 0; i < count; i++) {
-    Entity *e = &(entities[i]);
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
 
     if (e->type == ENTITY_TYPE_NODE) {
       if (e->isBeingDragged) {
@@ -363,59 +358,52 @@ void process_input(OuiContext *ouiContext, Entity *entities, int count, float de
           }
         }
       }
-    } else if (e->type == ENTITY_TYPE_UI_CONTROLS_LIST) {
+    } else if (e->type == ENTITY_TYPE_ACTIONS_MENU) {
       actionsMenu = e;
     }
   }
 
   state = keyboard_key_states[GLFW_KEY_Q];
-  if (state == 1 && actionsMenu) {
+  if (state == ON && actionsMenu->used) {
     actionsMenu->isVisible = 1 - actionsMenu->isVisible;
     keyboard_key_states[GLFW_KEY_Q] = 0;
   }
 
   state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
-
-  if (state == 1 && actionsMenu && actionsMenu->isVisible) {
-    Action action = get_pressed_action(ouiContext, entities, count, mousePos);
-    handle_action(action);
-  } else if (state == 1) {
-    if (!draggedNode) {
+  if (state == ON) {
+    if (!draggedNode->used) {
       closestNode->isBeingDragged = 1;
       draggedNode = closestNode;
     }
 
-    if (draggedNode) {
-      float speed = 10 * delta_t * 1000;
+    float speed = 10 * delta_t * 1000;
+    NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
+    float dirLength = nwt_length(dir);
+    float damp = 0.001 * dirLength;
+    dir = nwt_div_s(dir, dirLength);
 
-      NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
-      float dirLength = nwt_length(dir);
+    draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, speed * damp));
+    printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
 
-      float damp = 0.001 * dirLength;
-      dir = nwt_div_s(dir, dirLength);
-      draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, speed * damp));
-      printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
-    }
-  } else if (state == 0) {
-    if (draggedNode) {
-      draggedNode->isBeingDragged = 0;
-    }
+  } else if (state == OFF) {
+    draggedNode->isBeingDragged = 0;
   }
 }
 
-void apply_forces(OuiContext *ouiContext, Entity *entities, int count, float delta_t) {
+void apply_forces(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
   float containerWidth = oui_get_window_width(ouiContext);
   float containerHeight = oui_get_window_height(ouiContext);
 
   // collision forces
-  for (int i = 0; i < count; i++) {
-    Entity *e1 = &entities[i];
-    float r = e1->radius;
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e1 = get_entity(entityManager, i);
 
     if (e1->type != ENTITY_TYPE_NODE)
       continue;
 
     // wall collisions
+    float r = e1->radius;
+
     if ((e1->position.x - r < -containerWidth / 2 && e1->velocity.x < 0) ||
         (e1->position.x + r > containerWidth / 2 && e1->velocity.x > 0)) {
       e1->velocity.x *= -1;
@@ -427,8 +415,8 @@ void apply_forces(OuiContext *ouiContext, Entity *entities, int count, float del
     }
 
     // node on node violence
-    for (int j = i + 1; j < count; j++) {
-      Entity *e2 = &entities[j];
+    for (int j = i + 1; j < entityManager->count; j++) {
+      Entity *e2 = get_entity(entityManager, j);
 
       if (e2->type != ENTITY_TYPE_NODE)
         continue;
@@ -462,7 +450,7 @@ void apply_forces(OuiContext *ouiContext, Entity *entities, int count, float del
   }
 }
 
-void resolve_collisions(OuiContext *ouiContext, Entity *entities, int count, float delta_t) {
+void resolve_collisions(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
   int numIterations = CONSTRAINT_SOLVER_ITERATIONS;
 
   float containerWidth = oui_get_window_width(ouiContext);
@@ -470,8 +458,8 @@ void resolve_collisions(OuiContext *ouiContext, Entity *entities, int count, flo
 
   for (int i = 0; i < numIterations; i++) {
     // first constraint
-    for (int j = 0; j < count; j++) {
-      Entity *e = &entities[j];
+    for (int j = 1; j < entityManager->count; j++) {
+      Entity *e = get_entity(entityManager, j);
 
       if (e->type != ENTITY_TYPE_NODE)
         continue;
@@ -481,14 +469,14 @@ void resolve_collisions(OuiContext *ouiContext, Entity *entities, int count, flo
     }
 
     // second constraint
-    for (int j = 0; j < count; j++) {
-      Entity *e1 = &entities[j];
+    for (int j = 1; j < entityManager->count; j++) {
+      Entity *e1 = get_entity(entityManager, j);
 
       if (e1->type != ENTITY_TYPE_NODE)
         continue;
 
-      for (int k = j + 1; k < count; k++) {
-        Entity *e2 = &entities[k];
+      for (int k = j + 1; k < entityManager->count; k++) {
+        Entity *e2 = get_entity(entityManager, k);
 
         if (e2->type != ENTITY_TYPE_NODE)
           continue;
@@ -510,14 +498,14 @@ void resolve_collisions(OuiContext *ouiContext, Entity *entities, int count, flo
       }
     }
 
-    for (int j = 0; j < count; j++) {
-      Entity *e = &entities[j];
+    for (int j = 1; j < entityManager->count; j++) {
+      Entity *e = get_entity(entityManager, j);
 
       if (e->type != ENTITY_TYPE_LINK)
         continue;
 
-      Entity *a = &entities[e->firstChild];
-      Entity *b = &(entities[entities[e->firstChild].nextSibling]);
+      Entity *a = get_entity(entityManager, e->firstChild);
+      Entity *b = get_entity(entityManager, a->nextSibling);
 
       float restLength = e->restLength;
       NtVec2f delta = nwt_sub(a->position, b->position);
@@ -537,8 +525,8 @@ void resolve_collisions(OuiContext *ouiContext, Entity *entities, int count, flo
   }
 }
 
-void draw_node(OuiContext *ouiContext, Entity *entities, int count, EntityId id) {
-  Entity *e = &(entities[id]);
+void draw_node(OuiContext *ouiContext, EntityManager *entityManager, EntityId id) {
+  Entity *e = get_entity(entityManager, id);
 
   OuiRectangle rectangle = {0};
 
@@ -551,18 +539,18 @@ void draw_node(OuiContext *ouiContext, Entity *entities, int count, EntityId id)
   };
 
   rectangle.borderRadius = e->radius;
-  rectangle.borderResolution = NODE_BORDER_RESOLUTION;
+  rectangle.borderResolution = DEFAULT_BORDER_RESOLUTION;
 
   rectangle.backgroundColor = e->color;
 
   oui_draw_rectangle(ouiContext, &rectangle);
 }
 
-void draw_link(OuiContext *ouiContext, Entity *entities, int count, EntityId id) {
-  Entity *e = &(entities[id]);
+void draw_link(OuiContext *ouiContext, EntityManager *entityManager, EntityId id) {
+  Entity *e = get_entity(entityManager, id);
 
-  Entity *a = &(entities[e->firstChild]);
-  Entity *b = &(entities[entities[e->firstChild].nextSibling]);
+  Entity *a = get_entity(entityManager, e->firstChild);
+  Entity *b = get_entity(entityManager, a->nextSibling);
 
   NtVec2f diff = nwt_sub(a->position, b->position);
 
@@ -601,18 +589,17 @@ void draw_link(OuiContext *ouiContext, Entity *entities, int count, EntityId id)
   oui_draw_rectangle(ouiContext, &rectangle);
 }
 
-void draw_list(OuiContext *ouiContext, Entity *entities, int count, EntityId id) {
-  Entity *e = &(entities[id]);
+void draw_menu(OuiContext *ouiContext, EntityManager *entityManager, EntityId id) {
+  Entity *e = get_entity(entityManager, id);
 
   if (!e->isVisible)
     return;
 
-  int margin = 20;
+  int margin = MENU_MARGIN;
   int screenWidth = oui_get_window_width(ouiContext);
   int screenHeight = oui_get_window_height(ouiContext);
 
   OuiRectangle rectangle = {0};
-
   rectangle.width = screenWidth - 2 * margin;
   rectangle.height = screenHeight - 2 * margin;
 
@@ -622,8 +609,7 @@ void draw_list(OuiContext *ouiContext, Entity *entities, int count, EntityId id)
   };
 
   rectangle.borderRadius = e->radius;
-  rectangle.borderResolution = NODE_BORDER_RESOLUTION;
-
+  rectangle.borderResolution = DEFAULT_BORDER_RESOLUTION;
   rectangle.backgroundColor = e->color;
 
   oui_draw_rectangle(ouiContext, &rectangle);
@@ -631,8 +617,8 @@ void draw_list(OuiContext *ouiContext, Entity *entities, int count, EntityId id)
   int baseY = (float)screenHeight / 2 - 100;
   OuiText optionLabel = {0};
 
-  Entity *listOption = &(entities[e->firstChild]);
-  while (listOption) {
+  Entity *listOption = get_entity(entityManager, e->firstChild);
+  while (listOption->used) {
     optionLabel.startX = -(float)screenWidth / 2 + 2 * margin;
     optionLabel.startY = baseY;
     baseY -= 120;
@@ -650,11 +636,22 @@ void draw_list(OuiContext *ouiContext, Entity *entities, int count, EntityId id)
     }
 
     oui_draw_text(ouiContext, &optionLabel);
+    listOption = get_entity(entityManager, listOption->nextSibling);
+  }
+}
 
-    if (listOption->nextSibling == 0) {
-      listOption = NULL;
-    } else {
-      listOption = &(entities[listOption->nextSibling]);
-    }
+void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
+  if (action == GLFW_PRESS) {
+    keyboard_key_states[key] = 1;
+  } else if (action == GLFW_RELEASE) {
+    keyboard_key_states[key] = 0;
+  }
+}
+
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
+  if (action == GLFW_PRESS) {
+    mouse_button_states[button] = 1;
+  } else if (action == GLFW_RELEASE) {
+    mouse_button_states[button] = 0;
   }
 }

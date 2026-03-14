@@ -120,15 +120,6 @@ struct OuiContext {
   FTCharacter *fontCharacters;
 };
 
-#define NUM_KEYBOARD_KEYS 512
-static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
-
-#define NUM_MOUSE_BUTTONS 32
-static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
-
-void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
-void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
-
 #endif // OUI_USE_GLFW
 
 #if defined(OUI_USE_GLFW) && defined(OUI_IMPLEMENTATION) && !defined(OUI_IMPLEMENTED)
@@ -193,22 +184,6 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glViewport(0, 0, width, height);
 }
 
-void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
-  if (action == GLFW_PRESS) {
-    keyboard_key_states[key] = 1;
-  } else if (action == GLFW_RELEASE) {
-    keyboard_key_states[key] = 0;
-  }
-}
-
-void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
-  if (action == GLFW_PRESS) {
-    mouse_button_states[button] = 1;
-  } else if (action == GLFW_RELEASE) {
-    mouse_button_states[button] = 0;
-  }
-}
-
 OuiContext *oui_context_create(OuiConfig *ouiConfig) {
   printf("Initializing GLFW...\n");
   if (!glfwInit()) {
@@ -249,11 +224,6 @@ OuiContext *oui_context_create(OuiConfig *ouiConfig) {
   OuiContext *ouiContext = (OuiContext *)malloc(sizeof(OuiContext));
 
   ouiContext->window = window;
-
-  glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
-  glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
-  glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
-
   glfwMakeContextCurrent(ouiContext->window);
   glfwSetFramebufferSizeCallback(ouiContext->window, framebuffer_size_callback);
   gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
