@@ -11,9 +11,9 @@ typedef struct NtVec2f {
 } NtVec2f;
 
 #define NT_ZERO ((NtVec2f){.x = 0.0, .y = 0.0})
+#define NT_ONE ((NtVec2f){.x = 1.0, .y = 1.0})
 #define NT_X ((NtVec2f){.x = 1.0, .y = 0.0})
 #define NT_Y ((NtVec2f){.x = 0.0, .y = 1.0})
-#define NT_ONE ((NtVec2f){.x = 1.0, .y = 1.0})
 
 float nwt_length(NtVec2f v);
 NtVec2f nwt_normalize(NtVec2f v);

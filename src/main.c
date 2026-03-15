@@ -1,3 +1,4 @@
+#include <string.h>
 #define NEWTON_IMPLEMENTATION
 #include "newton.h"
 
@@ -10,12 +11,22 @@
 #include <stdlib.h>
 #include <time.h>
 
+#define WINDOW_TITLE "UNTITLED"
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
+
 #define NUM_LINKS 1
-#define NUM_NODES 3
+#define NUM_NODES 600
 #define MAX_ENTITIES 1000
+
+#define BUFFER_SIZE 1024
 
 #define MENU_MARGIN 20
 #define LINK_THICKNESS 8
+#define DEFAULT_FONT_SIZE 1
+#define DEFAULT_LINE_HEIGHT 48
+#define DEFAULT_NODE_MASSE 0.1
+#define DEFAULT_NODE_RADIUS 25
 #define DEFAULT_BORDER_RESOLUTION 50
 #define CONSTRAINT_SOLVER_ITERATIONS 2
 
@@ -27,6 +38,14 @@ static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
 
 void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
+NtVec2f get_mouse_position(OuiContext *ouiContext);
+
+typedef struct Clock {
+  float t;
+  float dt;
+} Clock;
+
+void clock_tick(Clock *clock);
 
 #define OFF 0
 #define ON 1
@@ -58,6 +77,7 @@ typedef enum EntityType {
   ENTITY_TYPE_ACTIONS_MENU,
   ENTITY_TYPE_ACTIONS_MENU_OPTION,
   ENTITY_TYPE_TEXT_INPUT,
+  ENTITY_TYPE_TEXT_LABEL,
   ENTITY_TYPE_COUNT
 } EntityType;
 
@@ -76,12 +96,13 @@ typedef struct Entity {
   float elasticity;
   float restLength;
 
-  int isBeingDragged;
-  NtVec2f targetPosition;
-
   int isEnabled;
   int isVisible;
+  int isBeingDragged;
+
   Action actions[ACTION_COUNT];
+
+  char buffer[BUFFER_SIZE];
 
   OuiColor color;
   EntityId firstChild;
@@ -97,54 +118,46 @@ EntityId create_entity(EntityManager *entityManager);
 Entity *get_entity(EntityManager *entityManager, EntityId id);
 void delete_entity(EntityManager *entityManager, EntityId id);
 
-void create_entities(OuiContext *ouiContext, EntityManager *entityManager);
-void update_entities(OuiContext *ouiContext, EntityManager *entityManager, float dt);
-void draw_entities(OuiContext *ouiContext, EntityManager *entityManager);
+typedef struct AppState {
+  OuiContext ouiContext;
+  EntityManager entityManager;
+  Clock clock;
 
-void process_input(OuiContext *ouiContext, EntityManager *entityManager, float dt);
-void apply_forces(OuiContext *ouiContext, EntityManager *entityManager, float dt);
-void resolve_collisions(OuiContext *ouiContext, EntityManager *entityManager, float dt);
+  EntityId fpsTextLabelId;
+  EntityId actionsMenuId;
+} AppState;
 
-void draw_node(OuiContext *ouiContext, EntityManager *entityManager, EntityId id);
-void draw_link(OuiContext *ouiContext, EntityManager *entityManager, EntityId id);
-void draw_menu(OuiContext *ouiContext, EntityManager *entityManager, EntityId id);
+void init(AppState *app);
+void update(AppState *app);
+void draw(AppState *appsState);
 
-NtVec2f get_mouse_position(OuiContext *ouiContext);
+void create_entities(AppState *app);
+
+void process_input(AppState *app);
+void apply_forces(AppState *app);
+void resolve_collisions(AppState *app);
+
+void draw_node(AppState *app, EntityId id);
+void draw_link(AppState *app, EntityId id);
+void draw_menu(AppState *app, EntityId id);
+void draw_label(AppState *app, EntityId id);
 
 int main() {
   srand(time(NULL));
 
-  OuiConfig ouiConfig = {
-      .windowTitle = "test",
-      .windowWidth = 480,
-      .windowHeight = 480,
-  };
+  AppState app = {0};
+  init(&app);
 
-  OuiContext *ouiContext = oui_context_create(&ouiConfig);
-  glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
-  glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
-  glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
+  while (oui_has_next_frame(&app.ouiContext)) {
+    oui_begin_frame(&app.ouiContext);
 
-  EntityManager entityManager = {0};
-  entityManager.count = 1;
+    update(&app);
+    draw(&app);
 
-  create_entities(ouiContext, &entityManager);
-
-  float prev_t = glfwGetTime(), curr_t, delta_t;
-  while (oui_has_next_frame(ouiContext)) {
-    curr_t = glfwGetTime();
-    delta_t = curr_t - prev_t;
-    prev_t = curr_t;
-
-    oui_begin_frame(ouiContext);
-
-    update_entities(ouiContext, &entityManager, delta_t);
-    draw_entities(ouiContext, &entityManager);
-
-    oui_end_frame(ouiContext);
+    oui_end_frame(&app.ouiContext);
   }
 
-  oui_context_destroy(ouiContext);
+  oui_context_destroy(&app.ouiContext);
   return 0;
 }
 
@@ -206,22 +219,101 @@ void delete_entity(EntityManager *entityManager, EntityId id) {
   entityManager->entities[id].used = OFF;
 }
 
-void create_entities(OuiContext *ouiContext, EntityManager *entityManager) {
-  OuiColor colors[3] = {
-      {255, 0.0, 0.0, 255},
-      {0.0, 255.0, 0.0, 255},
-      {0.0, 0.0, 255.0, 255},
+void init(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  Clock *clock = &(app->clock);
+
+  OuiConfig ouiConfig = {
+      .windowTitle = WINDOW_TITLE,
+      .windowWidth = WINDOW_WIDTH,
+      .windowHeight = WINDOW_HEIGHT,
   };
 
+  oui_context_init(ouiContext, &ouiConfig);
+  glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
+  glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
+  glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
+
+  entityManager->count = 1; // at least the NIL entity exists
+  create_entities(app);
+
+  clock->t = glfwGetTime();
+  clock->dt = 0.0;
+}
+
+void update(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  Clock *clock = &app->clock;
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &app->entityManager;
+
+  OuiVec2i windowSize = oui_get_window_size(ouiContext);
+
+  clock_tick(clock);
+  Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
+  snprintf(fpsTextLabel->buffer, BUFFER_SIZE, "%.2f FPS", 1 / clock->dt);
+
+  float marginTop = 40;
+  float marginRight = 5;
+  int fpsStringLength = strlen(fpsTextLabel->buffer);
+
+  fpsTextLabel->type = ENTITY_TYPE_TEXT_LABEL;
+  fpsTextLabel->position.x = (float)windowSize.x / 2 - 25 * fpsStringLength - marginRight;
+  fpsTextLabel->position.y = (float)windowSize.y / 2 - marginTop;
+
+  process_input(app);
+  apply_forces(app);
+  resolve_collisions(app);
+}
+
+void draw(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_NODE) {
+      draw_node(app, i);
+    } else if (e->type == ENTITY_TYPE_LINK) {
+      draw_link(app, i);
+    }
+  }
+
+  draw_menu(app, app->actionsMenuId);
+  draw_label(app, app->fpsTextLabelId);
+}
+
+void create_entities(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  OuiColor colors[3] = {
+      OUI_COLOR_RED,
+      OUI_COLOR_GREEN,
+      OUI_COLOR_BLUE,
+  };
+
+  OuiVec2i windowSize = oui_get_window_size(ouiContext);
+
+  float masse = DEFAULT_NODE_MASSE, radius = DEFAULT_NODE_RADIUS;
   int numNodes = NUM_NODES, numLinks = NUM_LINKS;
   EntityId firstNodeId = NIL, secondNodeId = NIL;
-
-  int screenWidth = oui_get_window_width(ouiContext);
-  int screenHeight = oui_get_window_height(ouiContext);
-
-  float masse = 0.1;
-  float radius = 50;
-  float baseX = -(float)screenWidth / 2, baseY = (float)screenHeight / 2;
 
   for (int i = 0; i < numNodes; i++) {
     EntityId id = create_entity(entityManager);
@@ -237,8 +329,8 @@ void create_entities(OuiContext *ouiContext, EntityManager *entityManager) {
     e->type = ENTITY_TYPE_NODE;
 
     e->radius = radius;
-    e->position.x = rand() % 400 - 200;
-    e->position.y = rand() % 400 - 200;
+    e->position.x = rand() % windowSize.x - (float)windowSize.x / 2;
+    e->position.y = rand() % windowSize.y - (float)windowSize.y / 2;
 
     e->velocity.x = rand() % 200 - 100;
     e->velocity.y = rand() % 200 - 100;
@@ -247,12 +339,6 @@ void create_entities(OuiContext *ouiContext, EntityManager *entityManager) {
     e->invMasse = 1.0 / masse;
 
     e->color = colors[i % 3];
-
-    baseX += 2 * radius + 10;
-    if (baseX > (float)screenWidth * 3 / 4) {
-      baseX = -(float)screenWidth / 2;
-      baseY -= 2 * radius + 10;
-    }
   }
 
   for (int i = numNodes; i - numNodes < numLinks; i++) {
@@ -267,27 +353,27 @@ void create_entities(OuiContext *ouiContext, EntityManager *entityManager) {
     e->firstChild = firstNodeId;
     entityManager->entities[firstNodeId].nextSibling = secondNodeId;
 
-    e->color = (OuiColor){255, 255, 255, 255};
+    e->color = OUI_COLOR_WHITE;
   }
 
   // ui controls
-  EntityId actionsMenuId = create_entity(entityManager);
-  Entity *actionsMenu = get_entity(entityManager, actionsMenuId);
+  app->actionsMenuId = create_entity(entityManager);
+  Entity *actionsMenu = get_entity(entityManager, app->actionsMenuId);
 
   actionsMenu->type = ENTITY_TYPE_ACTIONS_MENU;
-  actionsMenu->isVisible = 0;
   actionsMenu->radius = 20;
   actionsMenu->color.a = 100;
+  actionsMenu->isVisible = 0;
 
   Entity *prevMenuItem = get_entity(entityManager, NIL);
-  for (Action i = 0; i < ACTION_COUNT; i++) {
+  for (Action i = ACTION_NONE; i < ACTION_COUNT; i++) {
     EntityId menuItemId = create_entity(entityManager);
     Entity *menuItem = get_entity(entityManager, menuItemId);
 
     menuItem->type = ENTITY_TYPE_ACTIONS_MENU_OPTION;
-    menuItem->actions[i] = 1;
+    menuItem->actions[i] = ON;
 
-    if (i == 0) {
+    if (i == ACTION_NONE) {
       actionsMenu->firstChild = menuItemId;
     } else {
       prevMenuItem->nextSibling = menuItemId;
@@ -295,48 +381,34 @@ void create_entities(OuiContext *ouiContext, EntityManager *entityManager) {
 
     prevMenuItem = menuItem;
   }
+
+  app->fpsTextLabelId = create_entity(entityManager);
+  Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
+
+  float marginTop = 20;
+  float marginRight = 20;
+  int fpsStringLength = 9;
+  float fpsStringLineHeight = DEFAULT_LINE_HEIGHT;
+
+  fpsTextLabel->type = ENTITY_TYPE_TEXT_LABEL;
+  fpsTextLabel->position.x = (float)windowSize.x / 2 - 10 * fpsStringLength - marginRight;
+  fpsTextLabel->position.y = (float)windowSize.y / 2 - marginTop - fpsStringLineHeight / 2;
 }
 
-void update_entities(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
-  process_input(ouiContext, entityManager, delta_t);
-  apply_forces(ouiContext, entityManager, delta_t);
-  resolve_collisions(ouiContext, entityManager, delta_t);
-}
-
-void draw_entities(OuiContext *ouiContext, EntityManager *entityManager) {
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
-
-    if (e->type == ENTITY_TYPE_NODE) {
-      draw_node(ouiContext, entityManager, i);
-    } else if (e->type == ENTITY_TYPE_LINK) {
-      draw_link(ouiContext, entityManager, i);
-    } else if (e->type == ENTITY_TYPE_ACTIONS_MENU) {
-      draw_menu(ouiContext, entityManager, i);
-    }
+void process_input(AppState *app) {
+  if (app == NULL) {
+    return;
   }
-}
 
-NtVec2f get_mouse_position(OuiContext *ouiContext) {
-  double xpos, ypos;
-  glfwGetCursorPos(ouiContext->window, &xpos, &ypos);
+  float dt = app->clock.dt;
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *actionsMenu = get_entity(entityManager, app->actionsMenuId);
 
-  int screenWidth = oui_get_window_width(ouiContext);
-  int screenHeight = oui_get_window_height(ouiContext);
-
-  NtVec2f mousePos = {
-      .x = 2 * (float)xpos - (float)screenWidth / 2,
-      .y = -2 * (float)ypos + (float)screenHeight / 2};
-
-  return mousePos;
-}
-
-void process_input(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
   int state;
   NtVec2f mousePos = get_mouse_position(ouiContext);
 
   float minDist = -1;
-  Entity *actionsMenu = get_entity(entityManager, NIL);
   Entity *draggedNode = get_entity(entityManager, NIL);
   Entity *closestNode = get_entity(entityManager, NIL);
 
@@ -358,8 +430,6 @@ void process_input(OuiContext *ouiContext, EntityManager *entityManager, float d
           }
         }
       }
-    } else if (e->type == ENTITY_TYPE_ACTIONS_MENU) {
-      actionsMenu = e;
     }
   }
 
@@ -376,7 +446,7 @@ void process_input(OuiContext *ouiContext, EntityManager *entityManager, float d
       draggedNode = closestNode;
     }
 
-    float speed = 10 * delta_t * 1000;
+    float speed = 10 * dt * 1000;
     NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
     float dirLength = nwt_length(dir);
     float damp = 0.001 * dirLength;
@@ -390,7 +460,15 @@ void process_input(OuiContext *ouiContext, EntityManager *entityManager, float d
   }
 }
 
-void apply_forces(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
+void apply_forces(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  float dt = app->clock.dt;
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
   float containerWidth = oui_get_window_width(ouiContext);
   float containerHeight = oui_get_window_height(ouiContext);
 
@@ -444,13 +522,20 @@ void apply_forces(OuiContext *ouiContext, EntityManager *entityManager, float de
       }
     }
 
-    e1->velocity = nwt_add(e1->velocity, nwt_mult_s(e1->force, e1->invMasse * delta_t));
-    e1->position = nwt_add(e1->position, nwt_mult_s(e1->velocity, delta_t));
+    e1->velocity = nwt_add(e1->velocity, nwt_mult_s(e1->force, e1->invMasse * dt));
+    e1->position = nwt_add(e1->position, nwt_mult_s(e1->velocity, dt));
     e1->force = NT_ZERO;
   }
 }
 
-void resolve_collisions(OuiContext *ouiContext, EntityManager *entityManager, float delta_t) {
+void resolve_collisions(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
   int numIterations = CONSTRAINT_SOLVER_ITERATIONS;
 
   float containerWidth = oui_get_window_width(ouiContext);
@@ -525,9 +610,15 @@ void resolve_collisions(OuiContext *ouiContext, EntityManager *entityManager, fl
   }
 }
 
-void draw_node(OuiContext *ouiContext, EntityManager *entityManager, EntityId id) {
-  Entity *e = get_entity(entityManager, id);
+void draw_node(AppState *app, EntityId id) {
+  if (app == NULL) {
+    return;
+  }
 
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  Entity *e = get_entity(entityManager, id);
   OuiRectangle rectangle = {0};
 
   rectangle.width = 2 * e->radius;
@@ -546,14 +637,19 @@ void draw_node(OuiContext *ouiContext, EntityManager *entityManager, EntityId id
   oui_draw_rectangle(ouiContext, &rectangle);
 }
 
-void draw_link(OuiContext *ouiContext, EntityManager *entityManager, EntityId id) {
-  Entity *e = get_entity(entityManager, id);
+void draw_link(AppState *app, EntityId id) {
+  if (app == NULL) {
+    return;
+  }
 
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  Entity *e = get_entity(entityManager, id);
   Entity *a = get_entity(entityManager, e->firstChild);
   Entity *b = get_entity(entityManager, a->nextSibling);
 
   NtVec2f diff = nwt_sub(a->position, b->position);
-
   float distance = nwt_length(diff);
   NtVec2f normalizedDiff = nwt_normalize(diff);
 
@@ -589,7 +685,14 @@ void draw_link(OuiContext *ouiContext, EntityManager *entityManager, EntityId id
   oui_draw_rectangle(ouiContext, &rectangle);
 }
 
-void draw_menu(OuiContext *ouiContext, EntityManager *entityManager, EntityId id) {
+void draw_menu(AppState *app, EntityId id) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
   Entity *e = get_entity(entityManager, id);
 
   if (!e->isVisible)
@@ -619,14 +722,14 @@ void draw_menu(OuiContext *ouiContext, EntityManager *entityManager, EntityId id
 
   Entity *listOption = get_entity(entityManager, e->firstChild);
   while (listOption->used) {
-    optionLabel.startX = -(float)screenWidth / 2 + 2 * margin;
-    optionLabel.startY = baseY;
+    optionLabel.startPos.x = -(float)screenWidth / 2 + 2 * margin;
+    optionLabel.startPos.y = baseY;
     baseY -= 120;
 
-    optionLabel.lineHeight = 48;
+    optionLabel.lineHeight = DEFAULT_LINE_HEIGHT;
     optionLabel.maxLineWidth = screenWidth - 4 * margin;
 
-    optionLabel.fontSize = 1;
+    optionLabel.fontSize = DEFAULT_FONT_SIZE;
     optionLabel.fontColor = (OuiColor){255, 255, 255, 255};
 
     for (Action i = 0; i < ACTION_COUNT; i++) {
@@ -638,6 +741,31 @@ void draw_menu(OuiContext *ouiContext, EntityManager *entityManager, EntityId id
     oui_draw_text(ouiContext, &optionLabel);
     listOption = get_entity(entityManager, listOption->nextSibling);
   }
+}
+
+void draw_label(AppState *app, EntityId id) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  Entity *e = get_entity(entityManager, id);
+  OuiText text = {0};
+
+  text.fontSize = DEFAULT_FONT_SIZE;
+  text.lineHeight = DEFAULT_LINE_HEIGHT;
+
+  text.startPos = (OuiVec2f){
+      .x = e->position.x,
+      .y = e->position.y,
+  };
+
+  text.content = e->buffer;
+  text.fontColor = OUI_COLOR_WHITE;
+
+  oui_draw_text(ouiContext, &text);
 }
 
 void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
@@ -654,4 +782,28 @@ void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
   } else if (action == GLFW_RELEASE) {
     mouse_button_states[button] = 0;
   }
+}
+
+void clock_tick(Clock *clock) {
+  if (clock == NULL) {
+    return;
+  }
+
+  float now = glfwGetTime();
+  clock->dt = now - clock->t;
+  clock->t = now;
+}
+
+NtVec2f get_mouse_position(OuiContext *ouiContext) {
+  double xpos, ypos;
+  glfwGetCursorPos(ouiContext->window, &xpos, &ypos);
+
+  int screenWidth = oui_get_window_width(ouiContext);
+  int screenHeight = oui_get_window_height(ouiContext);
+
+  NtVec2f mousePos = {
+      .x = 2 * (float)xpos - (float)screenWidth / 2,
+      .y = -2 * (float)ypos + (float)screenHeight / 2};
+
+  return mousePos;
 }

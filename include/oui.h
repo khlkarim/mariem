@@ -1,40 +1,15 @@
 #if !defined(OUI_HEADER)
 #define OUI_HEADER
 
-//----------------------------------------
-// Windowing & Rendering Context
-//----------------------------------------
-
-typedef struct OuiContext OuiContext;
-
-typedef struct OuiConfig {
-  char *font; // path to .ttf file
-  int windowWidth;
-  int windowHeight;
-  char *windowTitle;
-} OuiConfig;
-
-OuiContext *oui_context_create(OuiConfig *ouiConfig);
-void oui_context_destroy(OuiContext *ouiContext);
-
-int oui_get_window_width(OuiContext *ouiContext);
-int oui_get_window_height(OuiContext *ouiContext);
-
-int oui_has_next_frame(OuiContext *ouiContext);
-void oui_begin_frame(OuiContext *ouiContext);
-void oui_end_frame(OuiContext *ouiContext);
-
-//----------------------------------------
-// Windowing & Rendering Context
-//----------------------------------------
-
-//----------------------------------------
-// Drawing stuff
-//----------------------------------------
+#define OUI_COLOR_BLACK ((OuiColor){0.0, 0.0, 0.0, 0.0})
+#define OUI_COLOR_RED ((OuiColor){255.0, 0.0, 0.0, 255.0})
+#define OUI_COLOR_GREEN ((OuiColor){0.0, 255.0, 0.0, 255.0})
+#define OUI_COLOR_BLUE ((OuiColor){0.0, 0.0, 255.0, 255.0})
+#define OUI_COLOR_WHITE ((OuiColor){255.0, 255.0, 255.0, 255.0})
 
 typedef struct OuiVec2i {
-  float x;
-  float y;
+  int x;
+  int y;
 } OuiVec2i;
 
 typedef struct OuiVec2f {
@@ -47,13 +22,6 @@ typedef struct OuiVec3f {
   float y;
   float z;
 } OuiVec3f;
-
-typedef struct OuiVec4f {
-  float x;
-  float y;
-  float z;
-  float w;
-} OuiVec4f;
 
 typedef struct OuiColor {
   float r;
@@ -80,25 +48,39 @@ typedef struct OuiRectangle {
 } OuiRectangle;
 
 typedef struct OuiText {
-  float startX;
-  float startY;
-  float rotationXY;
-
+  int fontSize;
   float lineHeight;
   float maxLineWidth;
-
-  int fontSize;
-  OuiColor fontColor;
+  OuiVec2f startPos;
+  float rotationXY;
 
   char *content;
+  OuiColor fontColor;
 } OuiText;
+
+typedef struct OuiContext OuiContext;
+
+typedef struct OuiConfig {
+  char *font; // path to .ttf file
+  int windowWidth;
+  int windowHeight;
+  char *windowTitle;
+} OuiConfig;
+
+void oui_context_init(OuiContext *ouiContext, OuiConfig *ouiConfig);
+void oui_context_destroy(OuiContext *ouiContext);
+
+int oui_has_next_frame(OuiContext *ouiContext);
+void oui_begin_frame(OuiContext *ouiContext);
+void oui_end_frame(OuiContext *ouiContext);
 
 void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle);
 void oui_draw_text(OuiContext *ouiContext, OuiText *text);
 
-//----------------------------------------
-// Drawing stuff
-//----------------------------------------
+OuiVec2i oui_get_window_size(OuiContext *ouiContext);
+int oui_get_window_width(OuiContext *ouiContext);
+int oui_get_window_height(OuiContext *ouiContext);
+
 #endif // OUI_HEADER
 
 #if defined(OUI_USE_GLFW) && !defined(OUI_USED)
@@ -106,18 +88,21 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text);
 
 typedef struct GLFWwindow GLFWwindow;
 
-typedef struct FTCharater {
-  unsigned int TextureID; // ID handle of the glyph texture
-  OuiVec2i Size;          // Size of glyph
-  OuiVec2i Bearing;       // Offset from baseline to left/top of glyph
-  unsigned int Advance;   // Offset to advance to next glyph
-} FTCharacter;
+typedef struct FontCharacter {
+  OuiVec2i Size;
+  OuiVec2i Bearing;
+  unsigned int Advance;
+  unsigned int TextureID;
+} FontCharacter;
 
 struct OuiContext {
   GLFWwindow *window;
 
   int num_characters;
-  FTCharacter *fontCharacters;
+  FontCharacter *fontCharacters;
+
+  unsigned int rectangleShaderProgram;
+  unsigned int rectangleVAO, rectangleVBO, rectangleEBO;
 };
 
 #endif // OUI_USE_GLFW
@@ -128,8 +113,6 @@ struct OuiContext {
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "glad/glad.h"
 #include <GLFW/glfw3.h>
@@ -140,6 +123,8 @@ struct OuiContext {
 //----------------------------------------
 // Utils (implemented at the end of the file)
 //----------------------------------------
+
+#define MAX_RECTANGLES 10000
 
 #define MAX_VERTICES 1000
 #define MAX_INDICES 1000
@@ -184,11 +169,11 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glViewport(0, 0, width, height);
 }
 
-OuiContext *oui_context_create(OuiConfig *ouiConfig) {
+void oui_context_init(OuiContext *ouiContext, OuiConfig *ouiConfig) {
   printf("Initializing GLFW...\n");
   if (!glfwInit()) {
     printf("Failed to initialize GLFW\n");
-    return NULL;
+    return;
   }
 
   char *defaultFont = "fonts/arial.ttf";
@@ -217,21 +202,23 @@ OuiContext *oui_context_create(OuiConfig *ouiConfig) {
   if (!window) {
     printf("Failed to create GLFW window\n");
     glfwTerminate();
-    return NULL;
+    return;
   }
-
-  printf("Creating a renderer...\n");
-  OuiContext *ouiContext = (OuiContext *)malloc(sizeof(OuiContext));
 
   ouiContext->window = window;
   glfwMakeContextCurrent(ouiContext->window);
   glfwSetFramebufferSizeCallback(ouiContext->window, framebuffer_size_callback);
   gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
-  ouiContext->num_characters = 128;
-  ouiContext->fontCharacters = (FTCharacter *)malloc(ouiContext->num_characters * sizeof(FTCharacter));
+  ouiContext->rectangleShaderProgram = glfw_rectangle_compile_shader_program(NULL);
+  glGenVertexArrays(1, &(ouiContext->rectangleVAO));
+  glGenBuffers(1, &(ouiContext->rectangleVBO));
+  glGenBuffers(1, &(ouiContext->rectangleEBO));
 
-  FTCharacter null_character = {0};
+  ouiContext->num_characters = 128;
+  ouiContext->fontCharacters = (FontCharacter *)malloc(ouiContext->num_characters * sizeof(FontCharacter));
+
+  FontCharacter null_character = {0};
   for (int i = 0; i < ouiContext->num_characters; i++) {
     ouiContext->fontCharacters[i] = null_character;
   }
@@ -239,13 +226,13 @@ OuiContext *oui_context_create(OuiConfig *ouiConfig) {
   FT_Library ft;
   if (FT_Init_FreeType(&ft)) {
     printf("Could not init FreeType Library\n");
-    return ouiContext;
+    return;
   }
 
   FT_Face face;
   if (FT_New_Face(ft, font, 0, &face)) {
     printf("Failed to load font: %s\n", font);
-    return ouiContext;
+    return;
   }
 
   FT_Set_Pixel_Sizes(face, 0, 48);
@@ -273,25 +260,29 @@ OuiContext *oui_context_create(OuiConfig *ouiConfig) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // now store character for later use
-    FTCharacter character = {
-        texture,
-        {face->glyph->bitmap.width, face->glyph->bitmap.rows},
-        {face->glyph->bitmap_left, face->glyph->bitmap_top},
-        face->glyph->advance.x};
+    FontCharacter character = {
+        .TextureID = texture,
+        .Size = {face->glyph->bitmap.width, face->glyph->bitmap.rows},
+        .Bearing = {face->glyph->bitmap_left, face->glyph->bitmap_top},
+        .Advance = face->glyph->advance.x,
+    };
 
     ouiContext->fontCharacters[c] = character;
   }
 
   FT_Done_Face(face);
   FT_Done_FreeType(ft);
-
-  return ouiContext;
 }
 
 void oui_context_destroy(OuiContext *ouiContext) {
   if (ouiContext == NULL || ouiContext->window == NULL) {
     return;
   }
+
+  glDeleteVertexArrays(1, &(ouiContext->rectangleVAO));
+  glDeleteBuffers(1, &(ouiContext->rectangleVBO));
+  glDeleteBuffers(1, &(ouiContext->rectangleVBO));
+  glDeleteProgram(ouiContext->rectangleShaderProgram);
 
   glfwDestroyWindow(ouiContext->window);
   glfwTerminate();
@@ -304,6 +295,13 @@ int oui_has_next_frame(OuiContext *ouiContext) {
   }
 
   return !glfwWindowShouldClose(ouiContext->window);
+}
+
+OuiVec2i oui_get_window_size(OuiContext *ouiContext) {
+  OuiVec2i size;
+  glfwGetFramebufferSize(ouiContext->window, &(size.x), &(size.y));
+
+  return size;
 }
 
 int oui_get_window_width(OuiContext *ouiContext) {
@@ -433,13 +431,12 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
   rectangle_compute_vertices(ouiContext, rectangle, vertices, &num_vertices);
   rectangle_compute_indices(ouiContext, rectangle, indices, &num_indices);
 
-  const unsigned int shaderProgram = glfw_rectangle_compile_shader_program(rectangle);
+  const unsigned int shaderProgram = ouiContext->rectangleShaderProgram;
 
-  // TODO: dont do what u dont gotta do
-  unsigned int VBO, VAO, EBO;
-  glGenVertexArrays(1, &VAO);
-  glGenBuffers(1, &VBO);
-  glGenBuffers(1, &EBO);
+  unsigned int
+      VBO = ouiContext->rectangleVBO,
+      VAO = ouiContext->rectangleVAO,
+      EBO = ouiContext->rectangleEBO;
 
   glBindVertexArray(VAO);
 
@@ -465,11 +462,6 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
   glUseProgram(shaderProgram);
   glBindVertexArray(VAO);
   glDrawElements(GL_TRIANGLES, num_indices, GL_UNSIGNED_INT, 0);
-
-  glDeleteVertexArrays(1, &VAO);
-  glDeleteBuffers(1, &VBO);
-  glDeleteBuffers(1, &EBO);
-  glDeleteProgram(shaderProgram);
 }
 
 static void rectangle_compute_vertices(
@@ -685,7 +677,7 @@ static unsigned int glfw_text_compile_shader_program(OuiText *text) {
 }
 
 void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
-  if (ouiContext == NULL || text == NULL) {
+  if (ouiContext == NULL || text == NULL || text->content == NULL) {
     return;
   }
 
@@ -722,10 +714,10 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
   int screenWidth, screenHeight;
   glfwGetWindowSize(ouiContext->window, &screenWidth, &screenHeight);
 
-  int x = text->startX, y = text->startY;
+  int x = text->startPos.x, y = text->startPos.y;
 
   for (int c = 0; text->content[c] != '\0'; c++) {
-    FTCharacter ch = ouiContext->fontCharacters[(int)text->content[c]];
+    FontCharacter ch = ouiContext->fontCharacters[(int)text->content[c]];
 
     float xpos = x + ch.Bearing.x * text->fontSize;
     float ypos = y - (ch.Size.y - ch.Bearing.y) * text->fontSize;
@@ -761,8 +753,8 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
     x += (ch.Advance >> 6) * text->fontSize; // bitshift by 6 to get value in pixels (2^6 = 64)
     float nextCharWidth = text->content[c + 1] == '\0' ? 0 : (ouiContext->fontCharacters[(int)text->content[c + 1]].Advance >> 6) * text->fontSize;
 
-    if (x + nextCharWidth > text->maxLineWidth) {
-      x = text->startX;
+    if (text->maxLineWidth > 0 && x + nextCharWidth > text->maxLineWidth) {
+      x = text->startPos.x;
       y -= text->lineHeight;
     }
   }
@@ -775,40 +767,4 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
   glDeleteProgram(shader);
 }
 
-void oui_layout_vertically(OuiContext *ouiContext, OuiRectangle *rectangles, int count) {
-  if (ouiContext == NULL || rectangles == NULL) {
-    return;
-  }
-
-  float anchorX = rectangles[0].centerPos.x;
-  float anchorY = rectangles[0].centerPos.y - rectangles[0].height / 2;
-
-  for (int i = 1; i < count; i++) {
-    anchorY -= rectangles[i].height / 2;
-
-    rectangles[i].centerPos.x = anchorX;
-    rectangles[i].centerPos.y = anchorY;
-
-    anchorY -= rectangles[i].height / 2;
-  }
-}
-
-void oui_layout_horizontally(OuiContext *ouiContext, OuiRectangle *rectangles, int count) {
-  if (ouiContext == NULL || rectangles == NULL) {
-    return;
-  }
-
-  int anchorX = rectangles[0].centerPos.x + rectangles[0].width / 2;
-  int anchorY = rectangles[0].centerPos.y;
-
-  for (int i = 1; i < count; i++) {
-    anchorX += rectangles[i].width / 2;
-
-    rectangles[i].centerPos.x = anchorX;
-    rectangles[i].centerPos.y = anchorY;
-
-    anchorX += rectangles[i].width / 2;
-  }
-}
-
-#endif // OUI_GLFW
+#endif // OUI_USE_GLFW
