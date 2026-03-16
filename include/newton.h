@@ -44,7 +44,13 @@ float nwt_length(NtVec2f v) {
 }
 
 NtVec2f nwt_normalize(NtVec2f v) {
-  return nwt_div_s(v, nwt_length(v));
+  float length = nwt_length(v);
+
+  if (length > 0) {
+    return nwt_div_s(v, nwt_length(v));
+  } else {
+    return v;
+  }
 }
 
 NtVec2f nwt_add(const NtVec2f a, const NtVec2f b) {

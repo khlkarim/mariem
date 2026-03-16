@@ -1,6 +1,6 @@
 CC=clang
 COMMON_CFLAGS= -Wall -Wextra -ggdb -std=c99 -pedantic
-COMMON_LIBS= -lm
+COMMON_LIBS= -ldl -lpthread -lm 
 COMMON_SOURCES= src/glad.c
 COMMON_INCLUDES= -Iinclude/
 
@@ -12,6 +12,9 @@ all: main
 
 main: build
 	$(CC) $(COMMON_CFLAGS) -o build/main src/main.c $(COMMON_SOURCES) $(COMMON_INCLUDES) $(COMMON_LIBS) $(GLFW) $(FREETYPE)
+
+test-miniaudio: build
+	$(CC) $(COMMON_CFLAGS) -o build/test-miniaudio src/test-miniaudio.c $(COMMON_INCLUDES) $(COMMON_LIBS)
 
 build:
 	mkdir -pv build

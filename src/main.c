@@ -1,4 +1,3 @@
-#include <string.h>
 #define NEWTON_IMPLEMENTATION
 #include "newton.h"
 
@@ -6,20 +5,33 @@
 #define OUI_USE_GLFW
 #include "oui.h"
 
+#define MINIAUDIO_IMPLEMENTATION
+#include "miniaudio.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
+#define DEVICE_FORMAT ma_format_f32
+#define DEVICE_CHANNELS 2
+#define DEVICE_SAMPLE_RATE 48000
+
+#define FONT "fonts/arial.ttf"
 #define WINDOW_TITLE "UNTITLED"
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
 
-#define NUM_LINKS 1
-#define NUM_NODES 600
+#define NUM_LINKS 0
+#define NUM_NODES 3
 #define MAX_ENTITIES 1000
 
-#define BUFFER_SIZE 1024
+#define MAX_SOUNDS 32
+#define BUFFER_SIZE 128
+
+#define DEFAULT_NODE_COLOR OUI_COLOR_BLACK
+#define SELECTED_NODE_COLOR OUI_COLOR_WHITE
 
 #define MENU_MARGIN 20
 #define LINK_THICKNESS 8
@@ -28,7 +40,7 @@
 #define DEFAULT_NODE_MASSE 0.1
 #define DEFAULT_NODE_RADIUS 25
 #define DEFAULT_BORDER_RESOLUTION 50
-#define CONSTRAINT_SOLVER_ITERATIONS 2
+#define CONSTRAINT_SOLVER_ITERATIONS 1
 
 #define NUM_KEYBOARD_KEYS (GLFW_KEY_LAST + 1)
 static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
@@ -100,8 +112,8 @@ typedef struct Entity {
   int isVisible;
   int isBeingDragged;
 
+  char *sounds[MAX_SOUNDS];
   Action actions[ACTION_COUNT];
-
   char buffer[BUFFER_SIZE];
 
   OuiColor color;
@@ -119,10 +131,15 @@ Entity *get_entity(EntityManager *entityManager, EntityId id);
 void delete_entity(EntityManager *entityManager, EntityId id);
 
 typedef struct AppState {
+  ma_engine audioEngine;
   OuiContext ouiContext;
   EntityManager entityManager;
   Clock clock;
 
+  int isPlaying;
+  EntityId audioPlaybackCursor;
+  EntityId pianoId;
+  EntityId selectedEntityId;
   EntityId fpsTextLabelId;
   EntityId actionsMenuId;
 } AppState;
@@ -229,6 +246,7 @@ void init(AppState *app) {
   Clock *clock = &(app->clock);
 
   OuiConfig ouiConfig = {
+      .font = FONT,
       .windowTitle = WINDOW_TITLE,
       .windowWidth = WINDOW_WIDTH,
       .windowHeight = WINDOW_HEIGHT,
@@ -239,11 +257,19 @@ void init(AppState *app) {
   glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
   glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
 
-  entityManager->count = 1; // at least the NIL entity exists
+  // at least the NIL entity exists
+  entityManager->count = 1;
   create_entities(app);
 
   clock->t = glfwGetTime();
   clock->dt = 0.0;
+
+  ma_result result;
+  result = ma_engine_init(NULL, &(app->audioEngine));
+  if (result != MA_SUCCESS) {
+    printf("Failed to initialize audio engine.");
+    return;
+  }
 }
 
 void update(AppState *app) {
@@ -303,14 +329,9 @@ void create_entities(AppState *app) {
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
 
-  OuiColor colors[3] = {
-      OUI_COLOR_RED,
-      OUI_COLOR_GREEN,
-      OUI_COLOR_BLUE,
-  };
-
   OuiVec2i windowSize = oui_get_window_size(ouiContext);
 
+  char *soundFileName = "wav/a1.wav";
   float masse = DEFAULT_NODE_MASSE, radius = DEFAULT_NODE_RADIUS;
   int numNodes = NUM_NODES, numLinks = NUM_LINKS;
   EntityId firstNodeId = NIL, secondNodeId = NIL;
@@ -338,7 +359,9 @@ void create_entities(AppState *app) {
     e->masse = masse;
     e->invMasse = 1.0 / masse;
 
-    e->color = colors[i % 3];
+    e->sounds[0] = soundFileName;
+
+    e->color = DEFAULT_NODE_COLOR;
   }
 
   for (int i = numNodes; i - numNodes < numLinks; i++) {
@@ -393,6 +416,47 @@ void create_entities(AppState *app) {
   fpsTextLabel->type = ENTITY_TYPE_TEXT_LABEL;
   fpsTextLabel->position.x = (float)windowSize.x / 2 - 10 * fpsStringLength - marginRight;
   fpsTextLabel->position.y = (float)windowSize.y / 2 - marginTop - fpsStringLineHeight / 2;
+
+  app->pianoId = create_entity(entityManager);
+  Entity *piano = get_entity(entityManager, app->pianoId);
+
+  piano->sounds[0] = "wav/a1.wav";
+}
+
+void create_link(AppState *app, EntityId a, EntityId b) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  EntityId linkId = create_entity(entityManager);
+  Entity *link = get_entity(entityManager, linkId);
+  Entity *bb = get_entity(entityManager, a);
+
+  link->type = ENTITY_TYPE_LINK;
+  link->color = OUI_COLOR_WHITE;
+  link->elasticity = 0.1;
+  link->restLength = 200;
+  link->firstChild = a;
+  bb->nextSibling = b;
+}
+
+void create_node(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  EntityId nodeId = create_entity(entityManager);
+  Entity *node = get_entity(entityManager, nodeId);
+
+  node->type = ENTITY_TYPE_NODE;
+  node->radius = DEFAULT_NODE_RADIUS;
+  node->masse = DEFAULT_NODE_MASSE;
+  node->invMasse = 1.0 / DEFAULT_NODE_MASSE;
+  node->color = DEFAULT_NODE_COLOR;
 }
 
 void process_input(AppState *app) {
@@ -403,6 +467,7 @@ void process_input(AppState *app) {
   float dt = app->clock.dt;
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
+
   Entity *actionsMenu = get_entity(entityManager, app->actionsMenuId);
 
   int state;
@@ -410,15 +475,41 @@ void process_input(AppState *app) {
 
   float minDist = -1;
   Entity *draggedNode = get_entity(entityManager, NIL);
-  Entity *closestNode = get_entity(entityManager, NIL);
 
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
+  state = keyboard_key_states[GLFW_KEY_Q];
+  if (state == ON && actionsMenu->used) {
+    actionsMenu->isVisible = 1 - actionsMenu->isVisible;
+    keyboard_key_states[GLFW_KEY_Q] = OFF;
+  }
 
-    if (e->type == ENTITY_TYPE_NODE) {
-      if (e->isBeingDragged) {
-        draggedNode = e;
-      } else {
+  state = keyboard_key_states[GLFW_KEY_N];
+  if (state == ON) {
+    keyboard_key_states[GLFW_KEY_N] = OFF;
+    create_node(app);
+  }
+
+  state = keyboard_key_states[GLFW_KEY_P];
+  if (state == ON) {
+    keyboard_key_states[GLFW_KEY_P] = OFF;
+    Entity *piano = get_entity(entityManager, app->pianoId);
+    printf("file name: %s\n", piano->sounds[0]);
+    ma_engine_play_sound(&app->audioEngine, piano->sounds[0], NULL);
+  }
+
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  if (state == ON) {
+    // generate a mouse repeat action to enable dragging
+    // if you didnt receive a mouse release event you are still dragging
+    // glfw doesnt support GLFW_REPEAT for mousee event
+    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = GLFW_REPEAT;
+
+    // find the clicked node, if there is any
+    EntityId closestNodeId = NIL;
+
+    for (int i = 1; i < entityManager->count; i++) {
+      Entity *e = get_entity(entityManager, i);
+
+      if (e->type == ENTITY_TYPE_NODE) {
         float distance = nwt_distance(mousePos, e->position);
 
         if (distance <= e->radius) {
@@ -426,37 +517,59 @@ void process_input(AppState *app) {
             minDist = distance;
           }
           if (distance <= minDist) {
-            closestNode = e;
+            closestNodeId = i;
           }
         }
       }
     }
-  }
 
-  state = keyboard_key_states[GLFW_KEY_Q];
-  if (state == ON && actionsMenu->used) {
-    actionsMenu->isVisible = 1 - actionsMenu->isVisible;
-    keyboard_key_states[GLFW_KEY_Q] = 0;
-  }
+    // there is no currently selected node => select the pressed node
+    if (app->selectedEntityId == NIL) {
+      app->selectedEntityId = closestNodeId;
 
-  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
-  if (state == ON) {
-    if (!draggedNode->used) {
-      closestNode->isBeingDragged = 1;
-      draggedNode = closestNode;
+      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+      selectedEntity->color = SELECTED_NODE_COLOR;
     }
+    // if there is a selected node and the user pressed away
+    // or repressed the currently selected entity => unselect it
+    else if (
+        closestNodeId == NIL ||
+        closestNodeId == app->selectedEntityId) {
+      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+      selectedEntity->color = DEFAULT_NODE_COLOR;
 
-    float speed = 10 * dt * 1000;
+      app->selectedEntityId = NIL;
+    }
+    // there is a currectly selected node
+    // and the user pressed another entity => create a link (and change focus) TODO: the selected nodes should be an array
+    else if (
+        closestNodeId != NIL &&
+        app->selectedEntityId != NIL &&
+        app->selectedEntityId != closestNodeId) {
+      create_link(app, app->selectedEntityId, closestNodeId);
+
+      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+      selectedEntity->color = DEFAULT_NODE_COLOR;
+
+      app->selectedEntityId = closestNodeId;
+
+      selectedEntity = get_entity(entityManager, app->selectedEntityId);
+      selectedEntity->color = SELECTED_NODE_COLOR;
+    }
+  } else if (state == GLFW_REPEAT) {
+    // detect hold action
+    float dragSpeed = 10 * dt * 1000;
+    draggedNode = get_entity(entityManager, app->selectedEntityId);
+
     NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
     float dirLength = nwt_length(dir);
-    float damp = 0.001 * dirLength;
-    dir = nwt_div_s(dir, dirLength);
 
-    draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, speed * damp));
-    printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
+    if (dirLength > 0) {
+      dir = nwt_div_s(dir, dirLength);
 
-  } else if (state == OFF) {
-    draggedNode->isBeingDragged = 0;
+      draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, dragSpeed));
+      printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
+    }
   }
 }
 
@@ -549,8 +662,8 @@ void resolve_collisions(AppState *app) {
       if (e->type != ENTITY_TYPE_NODE)
         continue;
 
-      e->position.x = max(min(e->position.x, containerWidth / 2), -containerWidth / 2);
-      e->position.y = max(min(e->position.y, containerHeight / 2), -containerHeight / 2);
+      e->position.x = oui_max(oui_min(e->position.x, containerWidth / 2), -containerWidth / 2);
+      e->position.y = oui_max(oui_min(e->position.y, containerHeight / 2), -containerHeight / 2);
     }
 
     // second constraint
@@ -633,7 +746,6 @@ void draw_node(AppState *app, EntityId id) {
   rectangle.borderResolution = DEFAULT_BORDER_RESOLUTION;
 
   rectangle.backgroundColor = e->color;
-
   oui_draw_rectangle(ouiContext, &rectangle);
 }
 
@@ -681,7 +793,6 @@ void draw_link(AppState *app, EntityId id) {
   rectangle.borderResolution = 0;
 
   rectangle.backgroundColor = e->color;
-
   oui_draw_rectangle(ouiContext, &rectangle);
 }
 
@@ -769,19 +880,11 @@ void draw_label(AppState *app, EntityId id) {
 }
 
 void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
-  if (action == GLFW_PRESS) {
-    keyboard_key_states[key] = 1;
-  } else if (action == GLFW_RELEASE) {
-    keyboard_key_states[key] = 0;
-  }
+  keyboard_key_states[key] = action;
 }
 
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
-  if (action == GLFW_PRESS) {
-    mouse_button_states[button] = 1;
-  } else if (action == GLFW_RELEASE) {
-    mouse_button_states[button] = 0;
-  }
+  mouse_button_states[button] = action;
 }
 
 void clock_tick(Clock *clock) {
