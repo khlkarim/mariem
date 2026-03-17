@@ -53,7 +53,7 @@ typedef struct OuiRectangle {
 } OuiRectangle;
 
 typedef struct OuiText {
-  int fontSize;
+  float fontSize;
   float lineHeight;
   float maxLineWidth;
   OuiVec2f startPos;
@@ -568,6 +568,64 @@ int oui_get_window_height(OuiContext *ouiContext) {
   return screenHeight;
 }
 
+void oui_flush_draw_calls(OuiContext *ouiContext) {
+  if (ouiContext == NULL) {
+    return;
+  }
+
+  OuiVec2f windowSize = {
+      .x = oui_get_window_width(ouiContext),
+      .y = oui_get_window_height(ouiContext),
+  };
+
+  // draw the scheduled rectangles
+  unsigned int
+      shader = ouiContext->rectangleShaderProgram,
+      rectangleVAO = ouiContext->rectangleVAO;
+
+  glUseProgram(shader);
+  glUniform2f(
+      glGetUniformLocation(shader, "uWindowSize"),
+      windowSize.x, windowSize.y);
+
+  glBindVertexArray(rectangleVAO);
+  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
+  glBufferSubData(
+      GL_ARRAY_BUFFER,
+      0, ouiContext->countRectangles * sizeof(OuiRectangle),
+      &(ouiContext->scheduledRectangles[0]));
+
+  glDrawArraysInstanced(
+      GL_TRIANGLES,
+      0, 6,
+      ouiContext->countRectangles);
+
+  glBindVertexArray(0);
+  ouiContext->countRectangles = 0;
+
+  // draw the scheduled cercles
+  unsigned int
+      cercleShader = ouiContext->cercleShaderProgram,
+      cercleVAO = ouiContext->cercleVAO;
+
+  glUseProgram(cercleShader);
+  glUniform2f(
+      glGetUniformLocation(cercleShader, "uWindowSize"),
+      windowSize.x, windowSize.y);
+
+  glBindVertexArray(cercleVAO);
+  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
+  glBufferSubData(
+      GL_ARRAY_BUFFER,
+      0, ouiContext->countCerlces * sizeof(OuiRectangle),
+      &(ouiContext->scheduledCercles[0]));
+
+  glDrawArraysInstanced(GL_TRIANGLES, 0, OUI_UNIT_CERCLE_INDEX_COUNT, ouiContext->countCerlces);
+
+  glBindVertexArray(0);
+  ouiContext->countCerlces = 0;
+}
+
 //----------------------------------------
 // OuiContext
 //----------------------------------------
@@ -647,6 +705,8 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
     slot->centerPos.x = x * cos(rectangle->rotationXY) - y * sin(rectangle->rotationXY) + rectangle->centerPos.x;
     slot->centerPos.y = x * sin(rectangle->rotationXY) + y * cos(rectangle->rotationXY) + rectangle->centerPos.y;
   }
+
+  oui_flush_draw_calls(ouiContext);
 }
 
 //----------------------------------------
