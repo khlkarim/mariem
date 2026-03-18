@@ -1,3 +1,5 @@
+#include "tinyfiledialogs.h"
+
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
@@ -14,38 +16,55 @@
 #include <string.h>
 #include <time.h>
 
-#define NUM_LINKS 0
-#define NUM_NODES 3
-#define MAX_ENTITIES 1000
+// Oui context config
+#define FONT "fonts/Geist-VariableFont_wght.ttf"
+#define WINDOW_TITLE "UNTITLED"
+#define WINDOW_WIDTH 800
+#define WINDOW_HEIGHT 600
 
 // Miniaudio device config
 #define DEVICE_CHANNELS 2
 #define DEVICE_SAMPLE_RATE 48000
 #define DEVICE_FORMAT ma_format_f32
 
-// Oui context config
-#define FONT "fonts/arial.ttf"
-#define WINDOW_TITLE "UNTITLED"
-#define WINDOW_WIDTH 800
-#define WINDOW_HEIGHT 600
-
-#define MAX_SOUNDS 32
-#define BUFFER_SIZE 128
-
-#define DEFAULT_NODE_COLOR OUI_COLOR_BLACK
-#define SELECTED_NODE_COLOR OUI_COLOR_WHITE
-
+// -------------------- StyleSheet --------------------
 #define MENU_MARGIN 20
-#define CONSTRAINT_SOLVER_ITERATIONS 1
-
-#define DEFAULT_BPM 60
-
-#define DEFAULT_LINK_THICKNESS 6
 #define DEFAULT_FONT_SIZE 1
 #define DEFAULT_LINE_HEIGHT 48
-#define DEFAULT_NODE_MASSE 0.1
-#define DEFAULT_NODE_RADIUS 25
+#define DEFAULT_LINK_THICKNESS 10
 #define DEFAULT_BORDER_RESOLUTION 50
+#define DEFAULT_TEXT_COLOR OUI_COLOR_WHITE
+#define DEFAULT_NODE_COLOR OUI_COLOR_BLACK
+#define DEFAULT_LINK_COLOR OUI_COLOR_BLACK
+#define SELECTED_NODE_COLOR OUI_COLOR_WHITE
+// -------------------- StyleSheet --------------------
+
+// ---------------- Physics Parameters ----------------
+#define DEFAULT_LINK_ELASTICITY 1.0
+#define DEFAULT_LINK_RESTLENGTH 200
+#define DEFAULT_NODE_MASSE 0.1 // this value is used to calculate the inv masse too
+#define DEFAULT_NODE_RADIUS 25
+#define CONSTRAINT_SOLVER_ITERATIONS 1
+// ---------------- Physics Parameters ----------------
+
+// ----------------------- Misc -----------------------
+#define NUM_NODES 3
+#define MAX_ENTITIES 100
+#define DEFAULT_BPM 60
+// ----------------------- Misc -----------------------
+
+// ------------------ Input Handling ------------------
+#define ON 1
+#define OFF 0
+
+#define KEYBINDING_UNSELECT_BRUSH GLFW_KEY_ESCAPE
+#define KEYBINDING_ASSERT_MODE GLFW_KEY_Q
+#define KEYBINDING_PERFORM_MODE GLFW_KEY_P
+#define KEYBINDING_INITIALIZE_MODE GLFW_KEY_I
+#define KEYBINDING_CREATE_NODE GLFW_KEY_N
+#define KEYBINDING_DELETE_SELECTED GLFW_KEY_D
+#define KEYBINDING_DISABLE_PHYSICS GLFW_KEY_SPACE
+#define KEYBINDING_OPEN_RESOURCE_MANAGER GLFW_KEY_S
 
 #define NUM_KEYBOARD_KEYS (GLFW_KEY_LAST + 1)
 static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
@@ -53,39 +72,12 @@ static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
 #define NUM_MOUSE_BUTTONS (GLFW_MOUSE_BUTTON_LAST + 1)
 static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
 
-void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
-void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 NtVec2f get_mouse_position(OuiContext *ouiContext);
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
+void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
+// ------------------ Input Handling ------------------
 
-typedef struct Clock {
-  float t;
-  float dt;
-} Clock;
-
-void clock_tick(Clock *clock);
-
-#define OFF 0
-#define ON 1
-
-typedef enum Action {
-  ACTION_NONE,
-  ACTION_CREATE_NODE,
-  ACTION_DELETE_NODE,
-  ACTION_CREATE_LINK,
-  ACTION_DELETE_LINK,
-  ACTION_LOAD_SOUND,
-  ACTION_COUNT
-} Action;
-
-char *actions_labels[ACTION_COUNT] = {
-    [ACTION_NONE] = "none",
-    [ACTION_CREATE_NODE] = "create a node",
-    [ACTION_DELETE_NODE] = "delete a node",
-    [ACTION_CREATE_LINK] = "create a link",
-    [ACTION_DELETE_LINK] = "delete a link",
-    [ACTION_LOAD_SOUND] = "load a sound",
-};
-
+// ---------------- Entity Management -----------------
 #define NIL 0
 typedef int EntityId;
 
@@ -93,10 +85,6 @@ typedef enum EntityType {
   ENTITY_TYPE_NONE,
   ENTITY_TYPE_NODE,
   ENTITY_TYPE_LINK,
-  ENTITY_TYPE_ACTIONS_MENU,
-  ENTITY_TYPE_ACTIONS_MENU_OPTION,
-  ENTITY_TYPE_TEXT_INPUT,
-  ENTITY_TYPE_TEXT_LABEL,
   ENTITY_TYPE_COUNT
 } EntityType;
 
@@ -117,18 +105,26 @@ typedef struct Entity {
 
   int isEnabled;
   int isVisible;
-  int isBeingDragged;
-
-  char *sounds[MAX_SOUNDS];
-  Action actions[ACTION_COUNT];
-  char buffer[BUFFER_SIZE];
-
+  char *buffer;
   OuiColor color;
-
-  char *name;
-
   EntityId edgeA;
   EntityId edgeB;
+
+  // TODO: actually this should the first child of the brush entity
+  EntityId selectedResource;
+
+  float width;
+  float height;
+
+  float marginTop;
+  float marginLeft;
+  float marginRight;
+  float marginBottom;
+
+  float paddingTop;
+  float paddingLeft;
+  float paddingRight;
+  float paddingBottom;
 
   EntityId firstChild;
   EntityId firstParent;
@@ -137,30 +133,47 @@ typedef struct Entity {
 
 typedef struct EntityManager {
   Entity entities[MAX_ENTITIES];
+  int assertMatrix[MAX_ENTITIES * MAX_ENTITIES];
+  int performMatrix[MAX_ENTITIES * MAX_ENTITIES];
   int count;
 } EntityManager;
 
 EntityId create_entity(EntityManager *entityManager);
 Entity *get_entity(EntityManager *entityManager, EntityId id);
 void delete_entity(EntityManager *entityManager, EntityId id);
+void append_child(EntityManager *entityManager, EntityId pId, EntityId cId);
+void remove_child(EntityManager *entityManager, EntityId pId, EntityId cId); // TODO: implement this when you need it
+void link_assert_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId assertedLinkId, int state);
+void link_assert_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId assertedNodeId, EntityId assertedResource);
+void link_perform_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId performedLinkId, int state);
+void link_perform_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId performedNodeId, EntityId performedResource);
+// ---------------- Entity Management -----------------
 
+// -------------------- App State ---------------------
+// TODO: change the backgroundColor as an indicator of the input mode
 typedef enum InputMode {
   INPUT_MODE_NONE,
-  INPUT_MODE_INITIALIZE,
   INPUT_MODE_ASSERT,
   INPUT_MODE_PERFORM,
+  INPUT_MODE_INITIALIZE,
   INPUT_MODE_COUNT
 } InputMode;
 
 char *input_mode_labels[INPUT_MODE_COUNT] = {
     [INPUT_MODE_NONE] = "None",
-    [INPUT_MODE_INITIALIZE] = "Initialize",
     [INPUT_MODE_ASSERT] = "Assert",
     [INPUT_MODE_PERFORM] = "Perform",
+    [INPUT_MODE_INITIALIZE] = "Initialize",
 };
+
+typedef struct Clock {
+  float t;
+  float dt;
+} Clock;
 
 typedef struct AppState {
   Clock clock;
+  InputMode inputMode;
   ma_engine audioEngine;
   OuiContext ouiContext;
   EntityManager entityManager;
@@ -168,37 +181,56 @@ typedef struct AppState {
   float BPM;
   int isPlaying;
   float hasBeenPlayingFor;
-  int physics;
 
-  InputMode inputMode;
+  int togglePhysics;
 
+  // special entities
   EntityId brushId;
-  EntityId ressourceManagerId;
+  EntityId fpsTextLabelId;
   EntityId currentlyPlaying;
   EntityId selectedEntityId;
-  EntityId fpsTextLabelId;
+  EntityId selectedLinkId;
+  EntityId resourceManagerId;
   EntityId inputModeTextLabelId;
-  EntityId actionsMenuId;
 } AppState;
 
 void init(AppState *app);
 void update(AppState *app);
 void draw(AppState *app);
+void clock_tick(Clock *clock);
 
 void create_entities(AppState *app);
+EntityId create_node(AppState *app);
+EntityId create_sound(AppState *app, char *fileName);
+EntityId create_link(AppState *app, EntityId edgeA, EntityId edgeB);
 
-void process_input(AppState *app);
+void handle_input(AppState *app);
+void handle_key_bindings(AppState *app);
+void handle_mouse_click(AppState *app);
+
+int clicked_add_sound(AppState *app);
+void resource_manager_click_handler(AppState *app);
+EntityId get_clicked_link(AppState *app);
+void select_link_handler(AppState *app);
+EntityId get_clicked_node(AppState *app);
+void select_node_handler(AppState *app);
+void select_brush_handler(AppState *app);
+
+void process_audio(AppState *app);
 void apply_forces(AppState *app);
 void resolve_collisions(AppState *app);
 
 void draw_node(AppState *app, EntityId id);
 void draw_link(AppState *app, EntityId id);
-void draw_menu(AppState *app, EntityId id);
-void draw_brush(AppState *app);
-void draw_ressource_manager(AppState *app);
 void draw_label(AppState *app, EntityId id);
 
-int main() {
+void draw_fps(AppState *app);
+void draw_brush(AppState *app);
+void draw_input_mode(AppState *app);
+void draw_resource_manager(AppState *app);
+// -------------------- App State ---------------------
+
+int main(int argc, char **argv) {
   srand(time(NULL));
 
   AppState app = {0};
@@ -214,10 +246,15 @@ int main() {
   }
 
   oui_context_destroy(&app.ouiContext);
+
+  (void)argc;
+  (void)argv;
   return 0;
 }
 
 EntityId create_entity(EntityManager *entityManager) {
+  //  TODO: zero set the entity behore returning it maybe
+
   assert(
       entityManager != NULL &&
       entityManager->count >= 1 &&
@@ -236,9 +273,9 @@ EntityId create_entity(EntityManager *entityManager) {
   // create a new slot
   if (entityManager->count < MAX_ENTITIES) {
     Entity *e = &(entityManager->entities[entityManager->count]);
-    entityManager->count++;
 
     e->used = ON;
+    entityManager->count++;
     return entityManager->count - 1;
   }
 
@@ -275,7 +312,952 @@ void delete_entity(EntityManager *entityManager, EntityId id) {
   entityManager->entities[id].used = OFF;
 }
 
-void play_audio(AppState *app) {
+void append_child(EntityManager *entityManager, EntityId pId, EntityId cId) {
+  if (
+      entityManager == NULL ||
+      pId == NIL || cId == NIL) {
+    return;
+  }
+
+  Entity *child = get_entity(entityManager, cId);
+  Entity *parent = get_entity(entityManager, pId);
+
+  if (parent->firstChild == NIL) {
+    parent->firstChild = cId;
+  } else {
+    Entity *iter = get_entity(entityManager, NIL);
+    EntityId iterId = parent->firstChild;
+
+    int dontLoopForever = 0;
+    while (
+        iterId != NIL &&
+        dontLoopForever < MAX_ENTITIES) {
+      iter = get_entity(entityManager, iterId);
+      iterId = iter->nextSibling;
+      dontLoopForever++;
+    }
+
+    iter->nextSibling = cId;
+  }
+
+  if (child->firstParent == NIL) {
+    child->firstParent = pId;
+  } else {
+    Entity *iter = get_entity(entityManager, NIL);
+    EntityId iterId = child->firstParent;
+
+    int dontLoopForever = 0;
+    while (
+        iterId != NIL &&
+        dontLoopForever < MAX_ENTITIES) {
+      iter = get_entity(entityManager, iterId);
+      iterId = iter->nextSibling;
+      dontLoopForever++;
+    }
+
+    iter->nextSibling = pId;
+  }
+}
+
+void remove_child(EntityManager *entityManager, EntityId pId, EntityId cId) {
+  if (
+      entityManager == NULL ||
+      pId == NIL || cId == NIL) {
+    return;
+  }
+
+  Entity *child = get_entity(entityManager, cId);
+  Entity *parent = get_entity(entityManager, pId);
+
+  if (parent->firstChild == cId) {
+    parent->firstChild = child->nextSibling;
+    child->nextSibling = NIL;
+  } else if (parent->firstChild != NIL) {
+    EntityId prevId = parent->firstChild;
+    Entity *prev = get_entity(entityManager, prevId);
+
+    EntityId currId = prev->nextSibling;
+    Entity *curr = get_entity(entityManager, currId);
+
+    int dontLoopForever = 0;
+    while (
+        currId != NIL &&
+        dontLoopForever < MAX_ENTITIES) {
+      curr = get_entity(entityManager, currId);
+
+      if (currId == cId) {
+        prev->nextSibling = curr->nextSibling;
+        curr->nextSibling = NIL;
+        break;
+      }
+
+      prev = curr;
+      currId = curr->nextSibling;
+      dontLoopForever++;
+    }
+  }
+
+  if (child->firstParent == pId) {
+    child->firstParent = parent->nextSibling;
+    parent->nextSibling = NIL;
+  } else if (child->firstParent != NIL) {
+    EntityId prevId = child->firstParent;
+    Entity *prev = get_entity(entityManager, prevId);
+
+    EntityId currId = prev->nextSibling;
+    Entity *curr = get_entity(entityManager, currId);
+
+    int dontLoopForever = 0;
+    while (
+        currId != NIL &&
+        dontLoopForever < MAX_ENTITIES) {
+      curr = get_entity(entityManager, currId);
+
+      if (currId == pId) {
+        prev->nextSibling = curr->nextSibling;
+        curr->nextSibling = NIL;
+        break;
+      }
+
+      prev = curr;
+      currId = curr->nextSibling;
+      dontLoopForever++;
+    }
+  }
+}
+
+void init(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  Clock *clock = &(app->clock);
+  ma_engine *audioEngine = &(app->audioEngine);
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  app->togglePhysics = ON;
+  app->inputMode = INPUT_MODE_INITIALIZE;
+
+  // initialize clock
+  clock->t = glfwGetTime();
+  clock->dt = 0.0;
+
+  // initialize oui
+  OuiConfig ouiConfig = {
+      .font = FONT,
+      .windowTitle = WINDOW_TITLE,
+      .windowWidth = WINDOW_WIDTH,
+      .windowHeight = WINDOW_HEIGHT,
+  };
+
+  oui_context_init(ouiContext, &ouiConfig);
+  glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
+  glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
+  glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
+
+  // initialize entityManager
+  entityManager->count = 1; // at least the NIL entity exists
+  create_entities(app);
+
+  // initialize audioEngine
+  ma_result result;
+  app->BPM = DEFAULT_BPM;
+  result = ma_engine_init(NULL, audioEngine);
+
+  if (result != MA_SUCCESS) {
+    printf("Failed to initialize audio engine.");
+    return;
+  }
+}
+
+void update(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  Clock *clock = &app->clock;
+
+  clock_tick(clock);
+  handle_input(app);
+  process_audio(app);
+  apply_forces(app);
+  resolve_collisions(app);
+}
+
+void draw(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_NODE) {
+      draw_node(app, i);
+    } else if (e->type == ENTITY_TYPE_LINK) {
+      draw_link(app, i);
+    }
+  }
+
+  draw_fps(app);
+  draw_brush(app);
+  draw_input_mode(app);
+  draw_resource_manager(app);
+}
+
+void create_entities(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  int numNodes = NUM_NODES;
+  float masse = DEFAULT_NODE_MASSE;
+  float radius = DEFAULT_NODE_RADIUS;
+  OuiColor color = DEFAULT_NODE_COLOR;
+
+  for (int i = 0; i < numNodes; i++) {
+    EntityId id = create_entity(entityManager);
+    Entity *e = get_entity(entityManager, id);
+
+    e->type = ENTITY_TYPE_NODE;
+
+    e->radius = radius;
+    e->position.x = rand() % (int)windowWidth - windowWidth / 2;
+    e->position.y = rand() % (int)windowHeight - windowHeight / 2;
+
+    e->velocity.x = rand() % 200 - 100;
+    e->velocity.y = rand() % 200 - 100;
+
+    e->masse = masse;
+    e->invMasse = 1.0 / masse;
+
+    e->color = color;
+  }
+
+  app->fpsTextLabelId = create_entity(entityManager);
+  Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
+  fpsTextLabel->marginTop = 50;
+  fpsTextLabel->marginRight = 15;
+
+  app->inputModeTextLabelId = create_entity(entityManager);
+  Entity *inputModeTextLabel = get_entity(entityManager, app->inputModeTextLabelId);
+  inputModeTextLabel->marginTop = 50;
+  inputModeTextLabel->marginLeft = 10;
+
+  app->brushId = create_entity(entityManager);
+  Entity *brush = get_entity(entityManager, app->brushId);
+  brush->isVisible = 1;
+  brush->radius = 10;
+  brush->color = OUI_COLOR_BLACK;
+  brush->color.a = 100;
+  brush->width = 400;
+  brush->height = 100;
+  brush->paddingLeft = 10;
+  brush->marginLeft = 10;
+  brush->marginBottom = 10;
+
+  app->resourceManagerId = create_entity(entityManager);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+  resourceManager->radius = 10;
+  resourceManager->color = OUI_COLOR_BLACK;
+  resourceManager->color.a = 100;
+  resourceManager->marginTop = 20;
+  resourceManager->marginLeft = 20;
+  resourceManager->marginRight = 20;
+  resourceManager->marginBottom = 20;
+  resourceManager->paddingLeft = 50;
+  resourceManager->paddingRight = 50;
+  resourceManager->paddingTop = 30;
+  resourceManager->paddingBottom = 30;
+}
+
+void handle_input(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  handle_key_bindings(app);
+  handle_mouse_click(app);
+}
+
+void handle_key_bindings(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+
+  int state;
+  state = keyboard_key_states[KEYBINDING_OPEN_RESOURCE_MANAGER];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_OPEN_RESOURCE_MANAGER] = OFF;
+    resourceManager->isVisible = 1 - resourceManager->isVisible;
+  }
+
+  state = keyboard_key_states[KEYBINDING_CREATE_NODE];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_CREATE_NODE] = OFF;
+    create_node(app);
+  }
+
+  state = keyboard_key_states[KEYBINDING_DELETE_SELECTED];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_DELETE_SELECTED] = OFF;
+    delete_entity(entityManager, app->selectedEntityId);
+    app->selectedEntityId = NIL;
+  }
+
+  state = keyboard_key_states[KEYBINDING_DISABLE_PHYSICS];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_DISABLE_PHYSICS] = OFF;
+    app->togglePhysics = 1 - app->togglePhysics;
+  }
+
+  state = keyboard_key_states[KEYBINDING_ASSERT_MODE];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_ASSERT_MODE] = OFF;
+    app->inputMode = INPUT_MODE_ASSERT;
+  }
+
+  state = keyboard_key_states[KEYBINDING_PERFORM_MODE];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_PERFORM_MODE] = OFF;
+    app->inputMode = INPUT_MODE_PERFORM;
+  }
+
+  state = keyboard_key_states[KEYBINDING_INITIALIZE_MODE];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_INITIALIZE_MODE] = OFF;
+    app->inputMode = INPUT_MODE_INITIALIZE;
+  }
+
+  state = keyboard_key_states[KEYBINDING_UNSELECT_BRUSH];
+  if (state == ON) {
+    keyboard_key_states[KEYBINDING_UNSELECT_BRUSH] = OFF;
+    Entity *brush = get_entity(entityManager, app->brushId);
+    brush->selectedResource = NIL;
+  }
+}
+
+void handle_mouse_click(AppState *app) {
+  resource_manager_click_handler(app);
+  select_brush_handler(app);
+  select_node_handler(app);
+  select_link_handler(app);
+  return;
+
+  // find the id of the cliked node
+  // based on that do a switch or if else statement
+
+  // what did you click on?
+  // based on that trigger a routine
+  // how do you know which routine to trigger? => enum Event listeners & switch statement
+  // when you click on a node check if a brush is selected
+
+  if (app == NULL) {
+    return;
+  }
+
+  float dt = app->clock.dt;
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  Entity *brush = get_entity(entityManager, app->brushId);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  if (state == ON) {
+    // is the resource manager open?
+    if (resourceManager->isVisible) {
+      mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = OFF;
+      // did the user click the add sound button?
+      // or did he click the remove sound button?
+
+      // Add sound button hitbox
+      float margin = MENU_MARGIN;
+      float paddingLeftRight = 50;
+      float paddingTopBottom = 50;
+
+      float buttonHeight = 100;
+      float buttonWidth = windowWidth - margin - paddingLeftRight;
+
+      NtVec2f buttonCenter = {
+          .x = 0,
+          .y = -windowHeight / 2 + margin + paddingTopBottom + buttonHeight / 2,
+      };
+
+      if (
+          mousePos.x >= buttonCenter.x - buttonWidth / 2 &&
+          mousePos.x <= buttonCenter.x + buttonWidth / 2 &&
+          mousePos.y >= buttonCenter.y - buttonHeight / 2 &&
+          mousePos.y <= buttonCenter.y + buttonHeight / 2) {
+        char *title = "Add sound";
+
+        char *fileName = tinyfd_openFileDialog(
+            title, /* NULL or "" */
+            NULL,  /* NULL or "" , ends with / to set only a directory */
+            0,     /* 0 (2 in the following example) */
+            NULL,  /* NULL or char const * lFilterPatterns[2]={"*.png","*.jpg"}; */
+            NULL,  /* NULL or "image files" */
+            0);    /* 0 or 1 */
+                   /* in case of multiple files, the separator is | */
+                   /* returns NULL on cancel */
+
+        printf("selected file: %s\n", fileName);
+        if (fileName) {
+          create_sound(app, fileName);
+        }
+      }
+    } else {
+      // check if the user clicked:
+      //  the brush tool
+      //  a node
+      //  a link
+
+      // did the user click the brush tool?
+      // brush tool hit box
+      float brushGap = 10;
+      float brushRadius = 50;
+      float brushPaddingLeft = 10;
+      float brushToolWidth = 400;
+      float brushToolHeight = 100;
+      float brushToolMarginLeft = 10;
+      float brushToolMarginBottom = 10;
+      NtVec2f brushToolCenter = {
+          .x = -windowWidth / 2 + brushToolMarginLeft + brushToolWidth / 2,
+          .y = -windowHeight / 2 + brushToolMarginBottom + brushToolHeight / 2,
+      };
+
+      if (
+          mousePos.x >= brushToolCenter.x - brushToolWidth / 2 &&
+          mousePos.x <= brushToolCenter.x + brushToolWidth / 2 &&
+          mousePos.y >= brushToolCenter.y - brushToolHeight / 2 &&
+          mousePos.y <= brushToolCenter.y + brushToolHeight / 2) {
+        printf("clicked brush box\n");
+
+        // which brush element did you press
+        EntityId resourceId = resourceManager->firstChild;
+        float baseX = -windowWidth / 2 + brushToolMarginLeft + brushPaddingLeft + brushRadius;
+        float baseY = -windowHeight / 2 + brushToolMarginBottom + brushToolHeight / 2;
+
+        while (resourceId != NIL) {
+          Entity *resource = get_entity(entityManager, resourceId);
+
+          if (nwt_distance(mousePos, (NtVec2f){baseX, baseY}) <= brushRadius) {
+            printf("pressed %d\n", resourceId);
+            brush->selectedResource = resourceId;
+          }
+
+          baseX += brushRadius + brushGap;
+          resourceId = resource->nextSibling;
+        }
+      } else {
+        // did the user select a brush?
+
+        // generate a mouse repeat action to enable dragging
+        // if you didnt receive a mouse release event you are still dragging
+        // reason: glfw doesnt support GLFW_REPEAT for mouse events
+        mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = GLFW_REPEAT;
+
+        // find the clicked node, if there is any
+        float minDist = -1;
+        EntityId clickedNode = NIL;
+
+        for (int i = 1; i < entityManager->count; i++) {
+          Entity *e = get_entity(entityManager, i);
+
+          if (e->type == ENTITY_TYPE_NODE) {
+            float distance = nwt_distance(mousePos, e->position);
+
+            if (distance <= e->radius) {
+              if (minDist == -1) {
+                minDist = distance;
+              }
+              if (distance <= minDist) {
+                clickedNode = i;
+              }
+            }
+          }
+        }
+
+        // there is no currently selected node => select the clicked node
+        if (app->selectedEntityId == NIL) {
+          // if there is a brush color selected attribute it to this node
+          // otherwise select it
+          if (brush->selectedResource != NIL) {
+            Entity *selectedBrush = get_entity(entityManager, brush->selectedResource);
+            Entity *clicked = get_entity(entityManager, clickedNode);
+            clicked->color = selectedBrush->color;
+          } else {
+            app->selectedEntityId = clickedNode;
+
+            Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+            selectedEntity->color = SELECTED_NODE_COLOR;
+          }
+        }
+        // if there is a selected node and the user clicked away
+        // or reclicked the currently selected entity => unselect it
+        else if (
+            clickedNode == NIL ||
+            clickedNode == app->selectedEntityId) {
+          Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+          selectedEntity->color = DEFAULT_NODE_COLOR;
+
+          app->selectedEntityId = NIL;
+        }
+        // there is a currectly selected node
+        // and the user clicked another node => create a link (and change focus) TODO: the selected nodes should be an array
+        else if (
+            clickedNode != NIL &&
+            app->selectedEntityId != NIL &&
+            app->selectedEntityId != clickedNode) {
+          create_link(app, app->selectedEntityId, clickedNode);
+
+          Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+          selectedEntity->color = DEFAULT_NODE_COLOR;
+
+          app->selectedEntityId = clickedNode;
+
+          selectedEntity = get_entity(entityManager, app->selectedEntityId);
+          selectedEntity->color = SELECTED_NODE_COLOR;
+        }
+      }
+    }
+  } else if (state == GLFW_REPEAT) {
+    // detect hold action
+    float dragSpeed = 10 * dt * 1000;
+    Entity *draggedNode = get_entity(entityManager, app->selectedEntityId);
+
+    NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
+    float dirLength = nwt_length(dir);
+
+    if (dirLength > 0) {
+      dir = nwt_div_s(dir, dirLength);
+
+      draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, dragSpeed));
+      printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
+    }
+  }
+}
+
+void resource_manager_click_handler(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+
+  if (!resourceManager->isVisible) {
+    return;
+  }
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  if (state == ON) {
+    // did the user click the add sound button?
+    // or did he click the remove sound button?
+
+    // Add sound button hitbox
+    float margin = resourceManager->marginBottom;
+    float paddingLeftRight = resourceManager->paddingLeft;
+    float paddingTopBottom = resourceManager->paddingTop;
+    float resourceManagerWidth = windowWidth - 2 * margin;
+    float resourceManagerHeight = windowHeight - 2 * margin;
+
+    float resourceGap = 30;
+    float resourceHeight = 100;
+    float resourcePaddingRight = 10;
+
+    // if the user clicked outside the resource manager
+    // close it and dont consume the click event
+    if (
+        !(mousePos.x >= -resourceManagerWidth / 2 &&
+          mousePos.x <= resourceManagerWidth / 2 &&
+          mousePos.y >= -resourceManagerHeight / 2 &&
+          mousePos.y <= resourceManagerHeight / 2)) {
+      resourceManager->isVisible = OFF;
+      return;
+    }
+
+    // if he clicked the resourceManager
+    // consume the click event
+    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = OFF;
+
+    // check of the user clicked the Add sound button
+    float buttonHeight = 100;
+    float buttonWidth = windowWidth - margin - paddingLeftRight;
+
+    NtVec2f buttonCenter = {
+        .x = 0,
+        .y = -windowHeight / 2 + margin + paddingTopBottom + buttonHeight / 2,
+    };
+
+    if (
+        mousePos.x >= buttonCenter.x - buttonWidth / 2 &&
+        mousePos.x <= buttonCenter.x + buttonWidth / 2 &&
+        mousePos.y >= buttonCenter.y - buttonHeight / 2 &&
+        mousePos.y <= buttonCenter.y + buttonHeight / 2) {
+
+      char *title = "Add sound";
+      char *fileName = tinyfd_openFileDialog(
+          title, /* NULL or "" */
+          NULL,  /* NULL or "" , ends with / to set only a directory */
+          0,     /* 0 (2 in the following example) */
+          NULL,  /* NULL or char const * lFilterPatterns[2]={"*.png","*.jpg"}; */
+          NULL,  /* NULL or "image files" */
+          0);    /* 0 or 1 */
+                 /* in case of multiple files, the separator is | */
+                 /* returns NULL on cancel */
+
+      printf("selected file: %s\n", fileName);
+      if (fileName) {
+        create_sound(app, fileName);
+      }
+
+      return;
+    }
+
+    // check if an X button was clicked
+    EntityId resourceId = resourceManager->firstChild;
+
+    float characterHeight = 25;
+    float characterWidth = 25;
+    float baseX = windowWidth / 2 - margin - paddingLeftRight - resourcePaddingRight - characterWidth;
+    float baseY = windowHeight / 2 - margin - paddingTopBottom - resourceHeight / 2;
+
+    while (resourceId != NIL) {
+      Entity *resource = get_entity(entityManager, resourceId);
+
+      if (
+          mousePos.x >= baseX &&
+          mousePos.x <= baseX + characterWidth &&
+          mousePos.y >= baseY - characterHeight / 2 &&
+          mousePos.y <= baseY + characterHeight / 2) {
+        remove_child(entityManager, app->resourceManagerId, resourceId);
+        return;
+      }
+
+      baseY -= resourceHeight + resourceGap;
+      resourceId = resource->nextSibling;
+    }
+  }
+}
+
+EntityId get_clicked_link(AppState *app) {
+  if (app == NULL) {
+    return NIL;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  if (state != ON) {
+    return NIL;
+  }
+
+  EntityId clickedLink = NIL;
+
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_LINK) {
+      float linkHeight = DEFAULT_LINK_THICKNESS;
+
+      Entity *a = get_entity(entityManager, e->edgeA);
+      Entity *b = get_entity(entityManager, e->edgeB);
+
+      NtVec2f diff = nwt_sub(a->position, b->position);
+      float distance = nwt_length(diff);
+      NtVec2f normalizedDiff = nwt_normalize(diff);
+
+      NtVec2f bOffset = nwt_add(b->position, nwt_mult_s(normalizedDiff, b->radius));
+      float linkLength = distance - a->radius - b->radius;
+
+      NtVec2f mid = nwt_add(bOffset, nwt_mult_s(normalizedDiff, linkLength / 2));
+
+      NtVec2f orthogonal = {
+          .x = -normalizedDiff.y,
+          .y = normalizedDiff.x};
+      nwt_normalize(orthogonal);
+
+      // we transform to a different frame of reference
+      // and we project on it
+      float firstComponent = nwt_dot(nwt_sub(mousePos, mid), normalizedDiff);
+      float secondComponent = nwt_dot(nwt_sub(mousePos, mid), orthogonal);
+
+      if (
+          firstComponent >= -linkLength / 2 &&
+          firstComponent <= linkLength / 2 &&
+          secondComponent >= -linkHeight / 2 &&
+          secondComponent <= linkHeight / 2) {
+        clickedLink = i;
+        printf("clicked %d\n", i);
+        break;
+      }
+    }
+  }
+
+  if (clickedLink != NIL) {
+    // if a link was efectively clicked consume the event
+    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = OFF;
+  }
+
+  return clickedLink;
+}
+
+void select_link_handler(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  InputMode mode = app->inputMode;
+  EntityManager *entityManager = &(app->entityManager);
+  EntityId clickedLinkId = get_clicked_link(app);
+
+  // what mode are we in?
+
+  // in initialization mode
+  // if a link is clicked you change focus to it
+  if (mode == INPUT_MODE_INITIALIZE && clickedLinkId != NIL) {
+    if (app->selectedLinkId != NIL) {
+      Entity *e = get_entity(entityManager, app->selectedLinkId);
+      e->color = DEFAULT_NODE_COLOR;
+    }
+    app->selectedLinkId = clickedLinkId;
+    Entity *e = get_entity(entityManager, clickedLinkId);
+    e->color = SELECTED_NODE_COLOR;
+  }
+  // in assert mode
+  // when a link is clicked you change the assertMatrix
+  else if (mode == INPUT_MODE_ASSERT) {
+    Entity *e = get_entity(entityManager, clickedLinkId);
+    link_assert_link(entityManager, app->selectedLinkId, clickedLinkId, 1 - e->isEnabled);
+  }
+  // in perform mode
+  // when a link is clicked you change the performMatrix
+  else if (mode == INPUT_MODE_PERFORM) {
+    Entity *e = get_entity(entityManager, clickedLinkId);
+    link_perform_link(entityManager, app->selectedLinkId, clickedLinkId, 1 - e->isEnabled);
+  }
+}
+
+EntityId get_clicked_node(AppState *app) {
+  if (app == NULL) {
+    return NIL;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  if (state != ON) {
+    return NIL;
+  }
+
+  float minDist = -1;
+  EntityId clickedNode = NIL;
+
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_NODE) {
+      float distance = nwt_distance(mousePos, e->position);
+
+      if (distance <= e->radius) {
+        if (minDist == -1) {
+          minDist = distance;
+        }
+        if (distance <= minDist) {
+          clickedNode = i;
+        }
+      }
+    }
+  }
+
+  if (clickedNode != NIL) {
+    // if a node was efectively clicked consume the event
+    // generate a drag mouse event, and glfw will automatically trigger the release event later
+    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = GLFW_REPEAT;
+  }
+
+  return clickedNode;
+}
+
+void select_node_handler(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  float dt = app->clock.dt;
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+
+  // if the user dragging, check if he is dragging a node
+  // and displace it appropriately
+  if (state == GLFW_REPEAT) {
+    float dragSpeed = 10 * dt * 1000;
+    Entity *draggedNode = get_entity(entityManager, app->selectedEntityId);
+
+    NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
+    float dirLength = nwt_length(dir);
+
+    if (dirLength > 0) {
+      dir = nwt_div_s(dir, dirLength);
+
+      draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, dragSpeed));
+      printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
+    }
+
+    return;
+  }
+
+  if (state != ON) {
+    return;
+  }
+
+  EntityId nodeId = get_clicked_node(app);
+  Entity *brush = get_entity(entityManager, app->brushId);
+
+  // there is no currently selected node
+  if (app->selectedEntityId == NIL) {
+    // if there is a brush color selected,
+    // attribute it to this node
+    if (brush->selectedResource != NIL) {
+      Entity *selectedBrush = get_entity(entityManager, brush->selectedResource);
+      Entity *clicked = get_entity(entityManager, nodeId);
+      clicked->color = selectedBrush->color;
+    } else {
+      // otherwise select it
+      app->selectedEntityId = nodeId;
+
+      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+      selectedEntity->color = SELECTED_NODE_COLOR;
+    }
+  }
+  // if there is a selected node and the user clicked away
+  // or reclicked the currently selected entity => unselect it
+  else if (
+      nodeId == NIL ||
+      nodeId == app->selectedEntityId) {
+    Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+    selectedEntity->color = DEFAULT_NODE_COLOR;
+
+    app->selectedEntityId = NIL;
+  }
+  // there is a currectly selected node
+  // and the user clicked another node => create a link (and change focus) TODO: the selected nodes should be an array
+  else if (
+      nodeId != NIL &&
+      app->selectedEntityId != NIL &&
+      app->selectedEntityId != nodeId) {
+    create_link(app, app->selectedEntityId, nodeId);
+
+    Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
+    selectedEntity->color = DEFAULT_NODE_COLOR;
+
+    app->selectedEntityId = nodeId;
+
+    selectedEntity = get_entity(entityManager, app->selectedEntityId);
+    selectedEntity->color = SELECTED_NODE_COLOR;
+  }
+}
+
+void select_brush_handler(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *brush = get_entity(entityManager, app->brushId);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  if (state != ON) {
+    return;
+  }
+
+  // brush tool hit box
+  float brushGap = 10;
+  float brushRadius = 50;
+  float brushPaddingLeft = brush->paddingLeft;
+  float brushToolWidth = brush->width;
+  float brushToolHeight = brush->height;
+  float brushToolMarginLeft = brush->marginLeft;
+  float brushToolMarginBottom = brush->marginBottom;
+
+  NtVec2f brushToolCenter = {
+      .x = -windowWidth / 2 + brushToolMarginLeft + brushToolWidth / 2,
+      .y = -windowHeight / 2 + brushToolMarginBottom + brushToolHeight / 2,
+  };
+
+  if (
+      mousePos.x >= brushToolCenter.x - brushToolWidth / 2 &&
+      mousePos.x <= brushToolCenter.x + brushToolWidth / 2 &&
+      mousePos.y >= brushToolCenter.y - brushToolHeight / 2 &&
+      mousePos.y <= brushToolCenter.y + brushToolHeight / 2) {
+    printf("clicked brush box\n");
+    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = OFF;
+
+    // which brush element did you press
+    EntityId resourceId = resourceManager->firstChild;
+    float baseX = -windowWidth / 2 + brushToolMarginLeft + brushPaddingLeft + brushRadius;
+    float baseY = -windowHeight / 2 + brushToolMarginBottom + brushToolHeight / 2;
+
+    while (resourceId != NIL) {
+      Entity *resource = get_entity(entityManager, resourceId);
+
+      if (nwt_distance(mousePos, (NtVec2f){baseX, baseY}) <= brushRadius) {
+        printf("pressed %d\n", resourceId);
+        brush->selectedResource = resourceId;
+      }
+
+      baseX += brushRadius + brushGap;
+      resourceId = resource->nextSibling;
+    }
+  }
+}
+
+void process_audio(AppState *app) {
   if (
       app == NULL ||
       !app->isPlaying ||
@@ -306,7 +1288,10 @@ void play_audio(AppState *app) {
     if (next != NIL) {
       app->currentlyPlaying = next;
       e = get_entity(entityManager, next);
-      ma_engine_play_sound(&app->audioEngine, e->sounds[0], NULL);
+
+      if (e->buffer) {
+        ma_engine_play_sound(&app->audioEngine, e->buffer, NULL);
+      }
     } else {
       app->currentlyPlaying = NIL;
     }
@@ -314,386 +1299,10 @@ void play_audio(AppState *app) {
   }
 }
 
-void init(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  app->physics = ON;
-  app->inputMode = INPUT_MODE_INITIALIZE;
-
-  Clock *clock = &(app->clock);
-  ma_engine *audioEngine = &(app->audioEngine);
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
-
-  // initialize clock
-  clock->t = glfwGetTime();
-  clock->dt = 0.0;
-
-  // initialize oui
-  OuiConfig ouiConfig = {
-      .font = FONT,
-      .windowTitle = WINDOW_TITLE,
-      .windowWidth = WINDOW_WIDTH,
-      .windowHeight = WINDOW_HEIGHT,
-  };
-
-  oui_context_init(ouiContext, &ouiConfig);
-  glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
-  glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
-  glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
-
-  // initialize entityManager
-  // at least the NIL entity exists
-  entityManager->count = 1;
-  create_entities(app);
-
-  // initialize audioEngine
-  ma_result result;
-  app->BPM = DEFAULT_BPM;
-  result = ma_engine_init(NULL, audioEngine);
-
-  if (result != MA_SUCCESS) {
-    printf("Failed to initialize audio engine.");
-    return;
-  }
-}
-
-void update(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  Clock *clock = &app->clock;
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &app->entityManager;
-
-  OuiVec2i windowSize = oui_get_window_size(ouiContext);
-
-  clock_tick(clock);
-  Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
-  Entity *inputModeTextLabel = get_entity(entityManager, app->inputModeTextLabelId);
-  snprintf(fpsTextLabel->buffer, BUFFER_SIZE, "%.2f FPS", 1 / clock->dt);
-
-  float marginTop = 50;
-  float marginLeft = 10;
-  float marginRight = 15;
-  int fpsStringLength = strlen(fpsTextLabel->buffer);
-
-  fpsTextLabel->position.x = (float)windowSize.x / 2 - 25 * fpsStringLength - marginRight;
-  fpsTextLabel->position.y = (float)windowSize.y / 2 - marginTop;
-
-  inputModeTextLabel->type = ENTITY_TYPE_TEXT_LABEL;
-  inputModeTextLabel->position.x = -(float)windowSize.x / 2 + marginLeft;
-  inputModeTextLabel->position.y = (float)windowSize.y / 2 - marginTop;
-
-  snprintf(inputModeTextLabel->buffer, BUFFER_SIZE, "%s", input_mode_labels[app->inputMode]);
-
-  process_input(app);
-  play_audio(app);
-
-  if (app->physics) {
-    apply_forces(app);
-    resolve_collisions(app);
-  }
-}
-
-void draw(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  EntityManager *entityManager = &(app->entityManager);
-
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
-
-    if (e->type == ENTITY_TYPE_NODE) {
-      draw_node(app, i);
-    } else if (e->type == ENTITY_TYPE_LINK) {
-      draw_link(app, i);
-    }
-  }
-
-  // draw_menu(app, app->actionsMenuId);
-  draw_brush(app);
-  draw_label(app, app->fpsTextLabelId);
-  draw_label(app, app->inputModeTextLabelId);
-  draw_ressource_manager(app);
-}
-
-void create_entities(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
-
-  OuiVec2i windowSize = oui_get_window_size(ouiContext);
-
-  char *soundFileName = "wav/a1.wav";
-  float masse = DEFAULT_NODE_MASSE, radius = DEFAULT_NODE_RADIUS;
-  int numNodes = NUM_NODES, numLinks = NUM_LINKS;
-  EntityId firstNodeId = NIL, secondNodeId = NIL;
-
-  for (int i = 0; i < numNodes; i++) {
-    EntityId id = create_entity(entityManager);
-    Entity *e = get_entity(entityManager, id);
-
-    if (i == 0) {
-      firstNodeId = id;
-    }
-    if (i == 1) {
-      secondNodeId = id;
-    }
-
-    e->type = ENTITY_TYPE_NODE;
-
-    e->radius = radius;
-    e->position.x = rand() % windowSize.x - (float)windowSize.x / 2;
-    e->position.y = rand() % windowSize.y - (float)windowSize.y / 2;
-
-    e->velocity.x = rand() % 200 - 100;
-    e->velocity.y = rand() % 200 - 100;
-
-    e->masse = masse;
-    e->invMasse = 1.0 / masse;
-
-    e->sounds[0] = soundFileName;
-
-    e->color = DEFAULT_NODE_COLOR;
-  }
-
-  /*for (int i = numNodes; i - numNodes < numLinks; i++) {
-    EntityId id = create_entity(entityManager);
-    Entity *e = get_entity(entityManager, id);
-
-    e->type = ENTITY_TYPE_LINK;
-
-    e->elasticity = 0.1;
-    e->restLength = 100;
-
-    e->firstChild = firstNodeId;
-    entityManager->entities[firstNodeId].nextSibling = secondNodeId;
-
-    e->color = OUI_COLOR_WHITE;
-  }*/
-
-  // ui controls
-  app->actionsMenuId = create_entity(entityManager);
-  Entity *actionsMenu = get_entity(entityManager, app->actionsMenuId);
-
-  actionsMenu->type = ENTITY_TYPE_ACTIONS_MENU;
-  actionsMenu->radius = 20;
-  actionsMenu->color.a = 100;
-  actionsMenu->isVisible = 0;
-
-  Entity *prevMenuItem = get_entity(entityManager, NIL);
-  for (Action i = ACTION_NONE; i < ACTION_COUNT; i++) {
-    EntityId menuItemId = create_entity(entityManager);
-    Entity *menuItem = get_entity(entityManager, menuItemId);
-
-    menuItem->type = ENTITY_TYPE_ACTIONS_MENU_OPTION;
-    menuItem->actions[i] = ON;
-    menuItem->color = OUI_COLOR_RED;
-
-    if (i == ACTION_NONE) {
-      actionsMenu->firstChild = menuItemId;
-    } else {
-      prevMenuItem->nextSibling = menuItemId;
-    }
-
-    prevMenuItem = menuItem;
-  }
-
-  app->fpsTextLabelId = create_entity(entityManager);
-  Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
-
-  float marginTop = 20;
-  float marginRight = 20;
-  int fpsStringLength = 9;
-  float fpsStringLineHeight = DEFAULT_LINE_HEIGHT;
-
-  fpsTextLabel->type = ENTITY_TYPE_TEXT_LABEL;
-  fpsTextLabel->position.x = (float)windowSize.x / 2 - 10 * fpsStringLength - marginRight;
-  fpsTextLabel->position.y = (float)windowSize.y / 2 - marginTop - fpsStringLineHeight / 2;
-
-  app->ressourceManagerId = app->actionsMenuId;
-
-  app->brushId = create_entity(entityManager);
-  Entity *brush = get_entity(entityManager, app->brushId);
-  brush->isVisible = 1;
-
-  app->inputModeTextLabelId = create_entity(entityManager);
-  Entity *inputModeTextLabel = get_entity(entityManager, app->inputModeTextLabelId);
-
-  float marginLeft = 20;
-
-  inputModeTextLabel->type = ENTITY_TYPE_TEXT_LABEL;
-  inputModeTextLabel->position.x = -(float)windowSize.x / 2 - marginLeft;
-  inputModeTextLabel->position.y = (float)windowSize.y / 2 - marginTop - fpsStringLineHeight / 2;
-  snprintf(inputModeTextLabel->buffer, BUFFER_SIZE, "%s", input_mode_labels[app->inputMode]);
-}
-
-void create_link(AppState *app, EntityId a, EntityId b) {
-  if (app == NULL) {
-    return;
-  }
-
-  EntityManager *entityManager = &(app->entityManager);
-
-  EntityId linkId = create_entity(entityManager);
-  Entity *link = get_entity(entityManager, linkId);
-
-  link->type = ENTITY_TYPE_LINK;
-  link->color = OUI_COLOR_WHITE;
-  link->elasticity = 0.1;
-  link->restLength = 200;
-
-  link->edgeA = a;
-  link->edgeB = b;
-}
-
-void create_node(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  EntityManager *entityManager = &(app->entityManager);
-
-  EntityId nodeId = create_entity(entityManager);
-  Entity *node = get_entity(entityManager, nodeId);
-
-  node->type = ENTITY_TYPE_NODE;
-  node->radius = DEFAULT_NODE_RADIUS;
-  node->masse = DEFAULT_NODE_MASSE;
-  node->invMasse = 1.0 / DEFAULT_NODE_MASSE;
-  node->color = DEFAULT_NODE_COLOR;
-}
-
-void process_input(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  float dt = app->clock.dt;
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
-
-  Entity *actionsMenu = get_entity(entityManager, app->actionsMenuId);
-
-  int state;
-  NtVec2f mousePos = get_mouse_position(ouiContext);
-
-  float minDist = -1;
-  Entity *draggedNode = get_entity(entityManager, NIL);
-
-  state = keyboard_key_states[GLFW_KEY_S];
-  if (state == ON && actionsMenu->used) {
-    actionsMenu->isVisible = 1 - actionsMenu->isVisible;
-    keyboard_key_states[GLFW_KEY_S] = OFF;
-  }
-
-  state = keyboard_key_states[GLFW_KEY_N];
-  if (state == ON) {
-    keyboard_key_states[GLFW_KEY_N] = OFF;
-    create_node(app);
-  }
-
-  state = keyboard_key_states[GLFW_KEY_P];
-  if (state == ON) {
-    keyboard_key_states[GLFW_KEY_P] = OFF;
-    app->physics = 1 - app->physics;
-
-    /*app->currentlyPlaying = 1;
-    app->isPlaying = 1 - app->isPlaying;
-    app->hasBeenPlayingFor = 0;*/
-    /*Entity *piano = get_entity(entityManager, app->pianoId);
-    printf("file name: %s\n", piano->sounds[0]);
-    ma_engine_play_sound(&app->audioEngine, piano->sounds[0], NULL);*/
-  }
-
-  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
-  if (state == ON) {
-    // generate a mouse repeat action to enable dragging
-    // if you didnt receive a mouse release event you are still dragging
-    // glfw doesnt support GLFW_REPEAT for mousee event
-    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = GLFW_REPEAT;
-
-    // find the clicked node, if there is any
-    EntityId closestNodeId = NIL;
-
-    for (int i = 1; i < entityManager->count; i++) {
-      Entity *e = get_entity(entityManager, i);
-
-      if (e->type == ENTITY_TYPE_NODE) {
-        float distance = nwt_distance(mousePos, e->position);
-
-        if (distance <= e->radius) {
-          if (minDist == -1) {
-            minDist = distance;
-          }
-          if (distance <= minDist) {
-            closestNodeId = i;
-          }
-        }
-      }
-    }
-
-    // there is no currently selected node => select the pressed node
-    if (app->selectedEntityId == NIL) {
-      app->selectedEntityId = closestNodeId;
-
-      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
-      selectedEntity->color = SELECTED_NODE_COLOR;
-    }
-    // if there is a selected node and the user pressed away
-    // or repressed the currently selected entity => unselect it
-    else if (
-        closestNodeId == NIL ||
-        closestNodeId == app->selectedEntityId) {
-      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
-      selectedEntity->color = DEFAULT_NODE_COLOR;
-
-      app->selectedEntityId = NIL;
-    }
-    // there is a currectly selected node
-    // and the user pressed another entity => create a link (and change focus) TODO: the selected nodes should be an array
-    else if (
-        closestNodeId != NIL &&
-        app->selectedEntityId != NIL &&
-        app->selectedEntityId != closestNodeId) {
-      create_link(app, app->selectedEntityId, closestNodeId);
-
-      Entity *selectedEntity = get_entity(entityManager, app->selectedEntityId);
-      selectedEntity->color = DEFAULT_NODE_COLOR;
-
-      app->selectedEntityId = closestNodeId;
-
-      selectedEntity = get_entity(entityManager, app->selectedEntityId);
-      selectedEntity->color = SELECTED_NODE_COLOR;
-    }
-  } else if (state == GLFW_REPEAT) {
-    // detect hold action
-    float dragSpeed = 10 * dt * 1000;
-    draggedNode = get_entity(entityManager, app->selectedEntityId);
-
-    NtVec2f dir = nwt_sub(mousePos, draggedNode->position);
-    float dirLength = nwt_length(dir);
-
-    if (dirLength > 0) {
-      dir = nwt_div_s(dir, dirLength);
-
-      draggedNode->force = nwt_add(draggedNode->force, nwt_mult_s(dir, dragSpeed));
-      printf("%f, %f\n", draggedNode->force.x, draggedNode->force.y);
-    }
-  }
-}
-
 void apply_forces(AppState *app) {
-  if (app == NULL) {
+  if (
+      app == NULL ||
+      app->togglePhysics == OFF) {
     return;
   }
 
@@ -701,8 +1310,12 @@ void apply_forces(AppState *app) {
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
 
-  float containerWidth = oui_get_window_width(ouiContext);
-  float containerHeight = oui_get_window_height(ouiContext);
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  float containerWidth = windowWidth;
+  float containerHeight = windowHeight;
 
   // collision forces
   for (int i = 1; i < entityManager->count; i++) {
@@ -761,7 +1374,9 @@ void apply_forces(AppState *app) {
 }
 
 void resolve_collisions(AppState *app) {
-  if (app == NULL) {
+  if (
+      app == NULL ||
+      app->togglePhysics == OFF) {
     return;
   }
 
@@ -770,8 +1385,12 @@ void resolve_collisions(AppState *app) {
 
   int numIterations = CONSTRAINT_SOLVER_ITERATIONS;
 
-  float containerWidth = oui_get_window_width(ouiContext);
-  float containerHeight = oui_get_window_height(ouiContext);
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  float containerWidth = windowWidth;
+  float containerHeight = windowHeight;
 
   for (int i = 0; i < numIterations; i++) {
     // first constraint
@@ -842,6 +1461,154 @@ void resolve_collisions(AppState *app) {
   }
 }
 
+EntityId create_node(AppState *app) {
+  if (app == NULL) {
+    return NIL;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  EntityId nodeId = create_entity(entityManager);
+  Entity *node = get_entity(entityManager, nodeId);
+
+  node->type = ENTITY_TYPE_NODE;
+  node->radius = DEFAULT_NODE_RADIUS;
+  node->masse = DEFAULT_NODE_MASSE;
+  node->invMasse = 1.0 / DEFAULT_NODE_MASSE;
+  node->color = DEFAULT_NODE_COLOR;
+
+  return nodeId;
+}
+
+EntityId create_link(AppState *app, EntityId a, EntityId b) {
+  if (app == NULL) {
+    return NIL;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  EntityId linkId = create_entity(entityManager);
+  Entity *link = get_entity(entityManager, linkId);
+
+  link->type = ENTITY_TYPE_LINK;
+  link->color = DEFAULT_LINK_COLOR;
+  link->elasticity = DEFAULT_LINK_ELASTICITY;
+  link->restLength = DEFAULT_LINK_RESTLENGTH;
+
+  link->edgeA = a;
+  link->edgeB = b;
+
+  return linkId;
+}
+
+EntityId create_sound(AppState *app, char *fileName) {
+  if (app == NULL) {
+    return NIL;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  EntityId soundId = create_entity(entityManager);
+  Entity *sound = get_entity(entityManager, soundId);
+
+  sound->buffer = fileName; // TODO: use after free?
+  sound->color = (OuiColor){
+      .r = rand() % 256,
+      .g = rand() % 256,
+      .b = rand() % 256,
+      .a = rand() % 256,
+  };
+
+  append_child(entityManager, app->resourceManagerId, soundId);
+  return soundId;
+}
+
+void draw_label(AppState *app, EntityId id) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  Entity *e = get_entity(entityManager, id);
+  OuiText text = {0};
+
+  text.fontSize = DEFAULT_FONT_SIZE;
+  text.lineHeight = DEFAULT_LINE_HEIGHT;
+
+  text.startPos = (OuiVec2f){
+      .x = e->position.x,
+      .y = e->position.y,
+  };
+
+  text.content = e->buffer;
+  text.fontColor = DEFAULT_TEXT_COLOR;
+
+  oui_draw_text(ouiContext, &text);
+}
+
+void draw_fps(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  Clock *clock = &(app->clock);
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  float marginTop = 50;
+  float marginRight = 15;
+  float characterWidth = 25;
+
+  const int bufferSize = 32;
+  char fpsString[bufferSize];
+  snprintf(fpsString, bufferSize, "%.2f FPS", 1 / clock->dt);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
+
+  int fpsStringLength = strlen(fpsString);
+  fpsTextLabel->position.y = (float)windowHeight / 2 - marginTop;
+  fpsTextLabel->position.x = (float)windowWidth / 2 - characterWidth * fpsStringLength - marginRight;
+
+  fpsTextLabel->buffer = fpsString;
+  draw_label(app, app->fpsTextLabelId);
+  fpsTextLabel->buffer = NULL;
+}
+
+void draw_input_mode(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  float marginTop = 50;
+  float marginLeft = 10;
+
+  const int bufferSize = 32;
+  char inputModeString[bufferSize];
+  snprintf(inputModeString, bufferSize, "%s", input_mode_labels[app->inputMode]);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  Entity *inputModeTextLabel = get_entity(entityManager, app->inputModeTextLabelId);
+
+  inputModeTextLabel->position.x = -(float)windowWidth / 2 + marginLeft;
+  inputModeTextLabel->position.y = (float)windowHeight / 2 - marginTop;
+
+  inputModeTextLabel->buffer = inputModeString;
+  draw_label(app, app->inputModeTextLabelId);
+  inputModeTextLabel->buffer = NULL;
+}
+
 void draw_node(AppState *app, EntityId id) {
   if (app == NULL) {
     return;
@@ -873,6 +1640,9 @@ void draw_link(AppState *app, EntityId id) {
     return;
   }
 
+  float arrowSize = 10;
+  float arrowBorderRadius = 3;
+
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
 
@@ -880,6 +1650,7 @@ void draw_link(AppState *app, EntityId id) {
   Entity *a = get_entity(entityManager, e->edgeA);
   Entity *b = get_entity(entityManager, e->edgeB);
 
+  // Draw the link's body
   NtVec2f diff = nwt_sub(a->position, b->position);
   float distance = nwt_length(diff);
   NtVec2f normalizedDiff = nwt_normalize(diff);
@@ -913,89 +1684,107 @@ void draw_link(AppState *app, EntityId id) {
 
   rectangle.backgroundColor = e->color;
   oui_draw_rectangle(ouiContext, &rectangle);
+  // Draw the link's body
 
-  rectangle.width = 10;
-  rectangle.height = 5;
-  rectangle.borderRadius = 3;
+  // Draw the arrow
+  rectangle.width = arrowSize;
+  rectangle.height = DEFAULT_LINK_THICKNESS;
+  rectangle.borderRadius = arrowBorderRadius;
+
+  // the direction orthogonal to the current link direction
+  NtVec2f orthogonal = {
+      .x = -normalizedDiff.y,
+      .y = normalizedDiff.x};
+  nwt_normalize(orthogonal);
+
+  // rotation relative to the current link direction
   rectangle.rotationXY += -NT_PI / 4;
 
-  NtVec2f perdendicular = (NtVec2f){1, 0};
-  if (normalizedDiff.y != 0) {
-    perdendicular = nwt_normalize((NtVec2f){1, -normalizedDiff.x / normalizedDiff.y});
-  }
-  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 - 2) + 5 * perdendicular.x;
-  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 - 2) + 5 * perdendicular.y;
+  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 - 2) + 5 * orthogonal.x;
+  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 - 2) + 5 * orthogonal.y;
   oui_draw_rectangle(ouiContext, &rectangle);
 
-  rectangle.width = 10;
-  rectangle.height = 5;
-  rectangle.borderRadius = 3;
+  // rotation relative to the current link direction
   rectangle.rotationXY += NT_PI / 2;
-  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 - 2) - 5 * perdendicular.x;
-  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 - 2) - 5 * perdendicular.y;
+  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 - 2) - 5 * orthogonal.x;
+  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 - 2) - 5 * orthogonal.y;
   oui_draw_rectangle(ouiContext, &rectangle);
+  // Draw the arrow
 }
 
-void draw_menu(AppState *app, EntityId id) {
+void draw_brush(AppState *app) {
   if (app == NULL) {
     return;
   }
 
+  float gap = 10;
+  float paddingLeft = 10;
+  float marginLeft = 10;
+  float marginBottom = 10;
+  float brushRadius = 50;
+  float paletteWidth = 400;
+  float paletteHeight = 100;
+
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
 
-  Entity *e = get_entity(entityManager, id);
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
 
-  if (!e->isVisible)
+  EntityId brushId = app->brushId;
+  Entity *brush = get_entity(entityManager, brushId);
+
+  if (!brush->isVisible) {
     return;
+  }
 
-  int margin = MENU_MARGIN;
-  int screenWidth = oui_get_window_width(ouiContext);
-  int screenHeight = oui_get_window_height(ouiContext);
+  EntityId resourceManagerId = app->resourceManagerId;
+  Entity *resourceManager = get_entity(entityManager, resourceManagerId);
 
   OuiRectangle rectangle = {0};
-  rectangle.width = screenWidth - 2 * margin;
-  rectangle.height = screenHeight - 2 * margin;
 
-  rectangle.centerPos = (OuiVec2f){
-      .x = e->position.x,
-      .y = e->position.y,
-  };
-
-  rectangle.borderRadius = e->radius;
-  rectangle.borderResolution = DEFAULT_BORDER_RESOLUTION;
-  rectangle.backgroundColor = e->color;
-
+  // draw the container's background
+  rectangle.width = paletteWidth;
+  rectangle.height = paletteHeight;
+  rectangle.borderRadius = brush->radius;
+  rectangle.backgroundColor = brush->color;
+  rectangle.centerPos.x = -windowWidth / 2 + marginLeft + paletteWidth / 2;
+  rectangle.centerPos.y = -windowHeight / 2 + marginBottom + paletteHeight / 2;
   oui_draw_rectangle(ouiContext, &rectangle);
-  oui_flush_draw_calls(ouiContext);
 
-  int baseY = (float)screenHeight / 2 - 100;
-  OuiText optionLabel = {0};
+  // draw the already loaded resources
+  EntityId resourceId = resourceManager->firstChild;
+  float baseX = -windowWidth / 2 + marginLeft + paddingLeft + brushRadius;
+  float baseY = -windowHeight / 2 + marginBottom + paletteHeight / 2;
 
-  Entity *listOption = get_entity(entityManager, e->firstChild);
-  while (listOption->used) {
-    optionLabel.startPos.x = -(float)screenWidth / 2 + 2 * margin;
-    optionLabel.startPos.y = baseY;
-    baseY -= 120;
+  while (resourceId != NIL) {
+    Entity *resource = get_entity(entityManager, resourceId);
 
-    optionLabel.lineHeight = DEFAULT_LINE_HEIGHT;
-    optionLabel.maxLineWidth = screenWidth - 4 * margin;
+    rectangle.width = brushRadius + 5;
+    rectangle.height = brushRadius + 5;
+    rectangle.centerPos.x = baseX;
+    rectangle.centerPos.y = baseY;
+    rectangle.borderRadius = brushRadius + 5;
+    rectangle.backgroundColor = OUI_COLOR_WHITE;
 
-    optionLabel.fontSize = DEFAULT_FONT_SIZE;
-    optionLabel.fontColor = (OuiColor){255, 255, 255, 255};
-
-    for (Action i = 0; i < ACTION_COUNT; i++) {
-      if (listOption->actions[i]) {
-        optionLabel.content = actions_labels[i];
-      }
+    if (brush->selectedResource == resourceId) {
+      oui_draw_rectangle(ouiContext, &rectangle);
     }
 
-    oui_draw_text(ouiContext, &optionLabel);
-    listOption = get_entity(entityManager, listOption->nextSibling);
+    rectangle.width = brushRadius;
+    rectangle.height = brushRadius;
+    rectangle.borderRadius = brushRadius;
+    rectangle.backgroundColor = resource->color;
+    rectangle.backgroundColor.a = 255;
+    oui_draw_rectangle(ouiContext, &rectangle);
+
+    baseX += brushRadius + gap;
+    resourceId = resource->nextSibling;
   }
 }
 
-void draw_label(AppState *app, EntityId id) {
+void draw_resource_manager(AppState *app) {
   if (app == NULL) {
     return;
   }
@@ -1003,36 +1792,102 @@ void draw_label(AppState *app, EntityId id) {
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
 
-  Entity *e = get_entity(entityManager, id);
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  EntityId resourceManagerId = app->resourceManagerId;
+  Entity *resourceManager = get_entity(entityManager, resourceManagerId);
+
+  if (!resourceManager->isVisible) {
+    return;
+  }
+
+  float fontSize = 0.8;
+
+  float gap = 30;
+  float margin = MENU_MARGIN;
+  float paddingTopBottom = 30;
+  float paddingLeftRight = 50;
+
+  float resourceGap = 30;
+  float resourceHeight = 100;
+  float resourcePaddingLeft = 10;
+  float resourceColorBorderRadius = 50;
+
   OuiText text = {0};
+  OuiRectangle rectangle = {0};
 
-  text.fontSize = DEFAULT_FONT_SIZE;
-  text.lineHeight = DEFAULT_LINE_HEIGHT;
+  // draw the menu's background
+  rectangle.width = windowWidth - 2 * margin;
+  rectangle.height = windowHeight - 2 * margin;
+  rectangle.centerPos.x = resourceManager->position.x;
+  rectangle.centerPos.y = resourceManager->position.y;
+  rectangle.borderRadius = resourceManager->radius;
+  rectangle.backgroundColor = resourceManager->color;
+  oui_draw_rectangle(ouiContext, &rectangle);
 
-  text.startPos = (OuiVec2f){
-      .x = e->position.x,
-      .y = e->position.y,
-  };
+  // draw the already loaded resources
+  EntityId resourceId = resourceManager->firstChild;
 
-  text.content = e->buffer;
+  text.fontSize = fontSize;
   text.fontColor = OUI_COLOR_WHITE;
+  text.lineHeight = DEFAULT_LINE_HEIGHT;
+  float baseX = resourceManager->position.x;
+  float baseY = windowHeight / 2 - margin - paddingTopBottom - resourceHeight / 2;
 
+  while (resourceId != NIL) {
+    Entity *resource = get_entity(entityManager, resourceId);
+
+    // draw the resource's background
+    rectangle.height = resourceHeight;
+    rectangle.width = windowWidth - 2 * paddingLeftRight;
+    rectangle.centerPos.x = baseX;
+    rectangle.centerPos.y = baseY;
+    rectangle.borderRadius = resourceManager->radius;
+    rectangle.backgroundColor = resourceManager->color;
+    oui_draw_rectangle(ouiContext, &rectangle);
+
+    // draw the resource's color value
+    rectangle.width = resourceColorBorderRadius;
+    rectangle.height = resourceColorBorderRadius;
+    rectangle.centerPos.x = -windowWidth / 2 + paddingLeftRight + resourcePaddingLeft + resourceColorBorderRadius;
+    rectangle.centerPos.y = baseY;
+    rectangle.borderRadius = resourceColorBorderRadius;
+    rectangle.backgroundColor = resource->color;
+    oui_draw_rectangle(ouiContext, &rectangle);
+
+    // draw the resource's label
+    text.startPos.x = -windowWidth / 2 + paddingLeftRight + resourcePaddingLeft + 2 * resourceColorBorderRadius + resourceGap;
+    text.startPos.y = baseY - 14;
+    text.content = resource->buffer;
+    oui_draw_text(ouiContext, &text);
+    text.content = NULL;
+
+    float characterWidth = 25;
+    text.content = "X";
+    text.startPos.x = windowWidth / 2 - margin - paddingLeftRight - resourcePaddingLeft - characterWidth;
+    oui_draw_text(ouiContext, &text);
+    text.content = NULL;
+
+    baseY -= resourceHeight + gap;
+    resourceId = resource->nextSibling;
+  }
+
+  // draw the add sound button
+  rectangle.width = windowWidth - 2 * paddingLeftRight;
+  rectangle.height = resourceHeight;
+  rectangle.centerPos.x = 0;
+  rectangle.centerPos.y = -windowHeight / 2 + margin + paddingTopBottom + resourceHeight / 2;
+  rectangle.borderRadius = resourceManager->radius;
+  rectangle.backgroundColor = resourceManager->color;
+  oui_draw_rectangle(ouiContext, &rectangle);
+
+  text.content = "Add sound";
+  text.startPos.x = -100;
+  text.startPos.y = -windowHeight / 2 + margin + paddingTopBottom + resourceHeight / 2 - 14;
   oui_draw_text(ouiContext, &text);
-}
-
-void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
-  keyboard_key_states[key] = action;
-
-  (void)window;
-  (void)scancode;
-  (void)mods;
-}
-
-void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
-  mouse_button_states[button] = action;
-
-  (void)window;
-  (void)mods;
+  text.content = NULL;
 }
 
 void clock_tick(Clock *clock) {
@@ -1059,179 +1914,17 @@ NtVec2f get_mouse_position(OuiContext *ouiContext) {
   return mousePos;
 }
 
-void draw_brush(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
+void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
+  mouse_button_states[button] = action;
 
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
-
-  float windowWidth, windowHeight;
-  windowWidth = oui_get_window_width(ouiContext);
-  windowHeight = oui_get_window_height(ouiContext);
-
-  EntityId brushId = app->brushId;
-  Entity *brush = get_entity(entityManager, brushId);
-
-  EntityId ressourceManagerId = app->ressourceManagerId;
-  Entity *ressourceManager = get_entity(entityManager, ressourceManagerId);
-
-  if (!brush->isVisible) {
-    return;
-  }
-
-  OuiRectangle rectangle = {0};
-
-  // draw the menu background
-  rectangle.width = 400;
-  rectangle.height = 100;
-  rectangle.borderRadius = 10;
-  rectangle.centerPos.x = -windowWidth / 2 + rectangle.width / 2 + 10;
-  rectangle.centerPos.y = -windowHeight / 2 + rectangle.height / 2 + 10;
-  rectangle.backgroundColor = OUI_COLOR_BLACK;
-  rectangle.backgroundColor.a = 100;
-
-  oui_draw_rectangle(ouiContext, &rectangle);
-
-  float cercleRadius = 30;
-  float baseX = -windowWidth / 2 + 20 + cercleRadius + 10;
-  float baseY = -windowHeight / 2 + rectangle.height / 2 + 10;
-
-  // draw the already loaded ressources
-  float paddingTop = 50;
-  float gapBetweenRessources = 10;
-  float ressourceHeight = 150;
-  EntityId ressourceId = ressourceManager->firstChild;
-
-  while (ressourceId != NIL) {
-    Entity *ressource = get_entity(entityManager, ressourceId);
-
-    // draw the background
-
-    // draw the color
-    // draw the label
-    // draw the delete button
-    /*    rectangle.width = windowWidth - 6 * MENU_MARGIN;
-        rectangle.height = ressourceHeight;
-        rectangle.centerPos.x = 0;
-        rectangle.centerPos.y = baseY;
-        rectangle.borderRadius = 20;
-        rectangle.backgroundColor = OUI_COLOR_BLACK;
-        rectangle.backgroundColor.a = 100;
-        oui_draw_rectangle(ouiContext, &rectangle);*/
-
-    rectangle.centerPos.x = baseX;
-    rectangle.centerPos.y = baseY;
-    rectangle.borderRadius = 50;
-    rectangle.width = rectangle.borderRadius;
-    rectangle.height = rectangle.borderRadius;
-    rectangle.backgroundColor = ressource->color;
-    oui_draw_rectangle(ouiContext, &rectangle);
-
-    baseX += cercleRadius * 2 + gapBetweenRessources;
-    ressourceId = ressource->nextSibling;
-  }
+  (void)window;
+  (void)mods;
 }
 
-void draw_ressource_manager(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
+void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
+  keyboard_key_states[key] = action;
 
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
-
-  float windowWidth, windowHeight;
-  windowWidth = oui_get_window_width(ouiContext);
-  windowHeight = oui_get_window_height(ouiContext);
-
-  EntityId ressourceManagerId = app->ressourceManagerId;
-  Entity *ressourceManager = get_entity(entityManager, ressourceManagerId);
-
-  if (!ressourceManager->isVisible) {
-    return;
-  }
-
-  OuiText text = {0};
-  OuiRectangle rectangle = {0};
-
-  // draw the menu background
-  rectangle.width = windowWidth - 2 * MENU_MARGIN;
-  rectangle.height = windowHeight - 2 * MENU_MARGIN;
-  rectangle.borderRadius = 20;
-
-  rectangle.backgroundColor = OUI_COLOR_BLACK;
-  rectangle.backgroundColor.a = 100;
-
-  oui_draw_rectangle(ouiContext, &rectangle);
-
-  // draw the already loaded ressources
-  float paddingTop = 50;
-  float gapBetweenRessources = 30;
-  float ressourceHeight = 150;
-  EntityId ressourceId = ressourceManager->firstChild;
-
-  float baseY = windowHeight / 2 - MENU_MARGIN - ressourceHeight / 2 - paddingTop;
-
-  text.lineHeight = DEFAULT_LINE_HEIGHT;
-  text.fontColor = OUI_COLOR_WHITE;
-
-  while (ressourceId != NIL && baseY > -windowHeight / 2 + MENU_MARGIN + ressourceHeight) {
-    Entity *ressource = get_entity(entityManager, ressourceId);
-
-    // draw the background
-
-    // draw the color
-    // draw the label
-    // draw the delete button
-    rectangle.width = windowWidth - 6 * MENU_MARGIN;
-    rectangle.height = ressourceHeight;
-    rectangle.centerPos.x = 0;
-    rectangle.centerPos.y = baseY;
-    rectangle.borderRadius = 20;
-    rectangle.backgroundColor = OUI_COLOR_BLACK;
-    rectangle.backgroundColor.a = 100;
-    oui_draw_rectangle(ouiContext, &rectangle);
-
-    rectangle.centerPos.x = -windowWidth / 2 + 6 * MENU_MARGIN;
-    rectangle.borderRadius = 50;
-    rectangle.width = rectangle.borderRadius;
-    rectangle.height = rectangle.borderRadius;
-    rectangle.backgroundColor = ressource->color;
-    oui_draw_rectangle(ouiContext, &rectangle);
-
-    text.fontSize = 0.8;
-    text.startPos.x = -windowWidth / 2 + 6 * MENU_MARGIN + 50;
-    text.startPos.y = baseY - 14;
-    for (Action i = ACTION_NONE; i < ACTION_COUNT; i++) {
-      if (ressource->actions[i]) {
-        text.content = actions_labels[i];
-      }
-    }
-
-    oui_draw_text(ouiContext, &text);
-
-    text.fontSize = 0.8;
-    text.content = "X";
-    text.startPos.x = windowWidth / 2 - 6 * MENU_MARGIN - 14;
-    oui_draw_text(ouiContext, &text);
-
-    baseY -= ressourceHeight + gapBetweenRessources;
-    ressourceId = ressource->nextSibling;
-  }
-
-  rectangle.width = windowWidth - 6 * MENU_MARGIN;
-  rectangle.height = ressourceHeight;
-  rectangle.centerPos.x = 0;
-  rectangle.centerPos.y = -windowHeight / 2 + 4 * MENU_MARGIN + ressourceHeight / 2;
-  rectangle.borderRadius = 20;
-  rectangle.backgroundColor = OUI_COLOR_BLACK;
-  rectangle.backgroundColor.a = 100;
-  oui_draw_rectangle(ouiContext, &rectangle);
-
-  text.content = "Add sound";
-  text.startPos.x = -100;
-  text.startPos.y = -windowHeight / 2 + 4 * MENU_MARGIN + ressourceHeight / 2 - 14;
-  oui_draw_text(ouiContext, &text);
+  (void)window;
+  (void)scancode;
+  (void)mods;
 }
