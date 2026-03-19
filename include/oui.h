@@ -91,7 +91,7 @@ int oui_get_window_height(OuiContext *ouiContext);
 #if defined(OUI_USE_GLFW) && !defined(OUI_USED)
 #define OUI_USED
 
-#define MAX_RECTANGLES 1000
+#define MAX_RECTANGLES 10000
 #define MAX_CERCLES 4 * MAX_RECTANGLES
 
 typedef struct GLFWwindow GLFWwindow;
@@ -229,6 +229,7 @@ static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig
   int windowHeight = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_HEIGHT : ouiConfig->windowHeight;
   char *windowTitle = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_TITLE : ouiConfig->windowTitle;
 
+  glfwWindowHint(GLFW_SAMPLES, 4); // anti-aliasing
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -320,6 +321,7 @@ static void oui__initialize_gpu_objects(OuiContext *ouiContext, OuiConfig *ouiCo
   }
 
   glEnable(GL_BLEND);
+  glEnable(GL_MULTISAMPLE);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
   // ---------------------- text -----------------------
