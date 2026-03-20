@@ -474,7 +474,9 @@ int oui_has_next_frame(OuiContext *ouiContext) {
 }
 
 void oui_begin_frame(OuiContext *ouiContext) {
-  glClearColor(0.39f, 0.58f, 0.93f, 1.0f);
+  // light blue : glClearColor(0.39f, 0.58f, 0.93f, 1.0f);
+  float grey = 18;
+  glClearColor(grey / 256, grey / 256, grey / 256, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -482,6 +484,10 @@ void oui_end_frame(OuiContext *ouiContext) {
   if (ouiContext == NULL) {
     return;
   }
+
+  glfwSwapBuffers(ouiContext->window);
+  glfwPollEvents();
+  return;
 
   OuiVec2f windowSize = {
       .x = oui_get_window_width(ouiContext),
@@ -637,12 +643,21 @@ void oui_flush_draw_calls(OuiContext *ouiContext) {
 //----------------------------------------
 
 void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
-  // TODO: if there is no memory space to schedule a rectangle
-  // draw it now, rather than discard it
-
   if (ouiContext == NULL || rectangle == NULL) {
     return;
   }
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  unsigned int
+      rectangleShader = ouiContext->rectangleShaderProgram,
+      rectangleVAO = ouiContext->rectangleVAO;
+
+  unsigned int
+      cercleShader = ouiContext->cercleShaderProgram,
+      cercleVAO = ouiContext->cercleVAO;
 
   int isRounded = rectangle->borderRadius > 0;
 
@@ -653,11 +668,23 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
     if (ouiContext->countRectangles >= MAX_RECTANGLES) {
       return;
     }
+    glUseProgram(rectangleShader);
+    glUniform2f(
+        glGetUniformLocation(rectangleShader, "uWindowSize"),
+        windowWidth, windowHeight);
 
-    OuiRectangle *slot = &(ouiContext->scheduledRectangles[ouiContext->countRectangles]);
-    ouiContext->countRectangles++;
-    *slot = *rectangle;
+    glBindVertexArray(rectangleVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        0, sizeof(OuiRectangle),
+        rectangle);
 
+    glDrawArrays(
+        GL_TRIANGLES,
+        0, 6);
+
+    glBindVertexArray(0);
     return;
   }
 
@@ -666,11 +693,24 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
       isRounded &&
       rectangle->borderRadius == maxBorderRadius &&
       rectangle->width == rectangle->height) {
+    glUseProgram(cercleShader);
+    glUniform2f(
+        glGetUniformLocation(cercleShader, "uWindowSize"),
+        windowWidth, windowHeight);
 
-    OuiRectangle *slot = &(ouiContext->scheduledCercles[ouiContext->countCerlces]);
-    ouiContext->countCerlces++;
-    *slot = *rectangle;
+    glBindVertexArray(cercleVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        0, sizeof(OuiRectangle),
+        rectangle);
 
+    glDrawArrays(
+        GL_TRIANGLES,
+        0,
+        OUI_UNIT_CERCLE_INDEX_COUNT);
+
+    glBindVertexArray(0);
     return;
   }
 
@@ -682,33 +722,66 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
     return;
   }
 
-  OuiRectangle *slot1 = &(ouiContext->scheduledRectangles[ouiContext->countRectangles]);
+  OuiRectangle rect1 = *rectangle;
+  rect1.height -= 2 * rectangle->borderRadius;
+  OuiRectangle rect2 = *rectangle;
+  rect2.width -= 2 * rectangle->borderRadius;
 
-  *slot1 = *rectangle;
-  slot1->height -= 2 * rectangle->borderRadius;
+  glUseProgram(rectangleShader);
+  glUniform2f(
+      glGetUniformLocation(rectangleShader, "uWindowSize"),
+      windowWidth, windowHeight);
 
-  ouiContext->countRectangles++;
+  glBindVertexArray(rectangleVAO);
+  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
+  glBufferSubData(
+      GL_ARRAY_BUFFER,
+      0, sizeof(OuiRectangle),
+      &rect1);
 
-  OuiRectangle *slot2 = &(ouiContext->scheduledRectangles[ouiContext->countRectangles]);
+  glDrawArrays(
+      GL_TRIANGLES,
+      0, 6);
 
-  *slot2 = *rectangle;
-  slot2->width -= 2 * rectangle->borderRadius;
+  glBufferSubData(
+      GL_ARRAY_BUFFER,
+      0, sizeof(OuiRectangle),
+      &rect2);
 
-  ouiContext->countRectangles++;
+  glDrawArrays(
+      GL_TRIANGLES,
+      0, 6);
 
+  glBindVertexArray(0);
+
+  glUseProgram(cercleShader);
+  glUniform2f(
+      glGetUniformLocation(cercleShader, "uWindowSize"),
+      windowWidth, windowHeight);
+
+  glBindVertexArray(cercleVAO);
+  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
   for (int i = 0; i < OUI_UNIT_RECTANGLE_VERTEX_COUNT; i++) {
-    OuiRectangle *slot = &(ouiContext->scheduledCercles[ouiContext->countCerlces]);
-    ouiContext->countCerlces++;
-    *slot = *rectangle;
+    OuiRectangle slot = {0};
+    slot = *rectangle;
 
     float x = (rectangle->width - 2 * rectangle->borderRadius) * OUI_UNIT_RECTANGLE_VERTICES[i].position.x;
     float y = (rectangle->height - 2 * rectangle->borderRadius) * OUI_UNIT_RECTANGLE_VERTICES[i].position.y;
 
-    slot->centerPos.x = x * cos(rectangle->rotationXY) - y * sin(rectangle->rotationXY) + rectangle->centerPos.x;
-    slot->centerPos.y = x * sin(rectangle->rotationXY) + y * cos(rectangle->rotationXY) + rectangle->centerPos.y;
-  }
+    slot.centerPos.x = x * cos(rectangle->rotationXY) - y * sin(rectangle->rotationXY) + rectangle->centerPos.x;
+    slot.centerPos.y = x * sin(rectangle->rotationXY) + y * cos(rectangle->rotationXY) + rectangle->centerPos.y;
 
-  oui_flush_draw_calls(ouiContext);
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        0, sizeof(OuiRectangle),
+        &slot);
+
+    glDrawArrays(
+        GL_TRIANGLES,
+        0,
+        OUI_UNIT_CERCLE_INDEX_COUNT);
+  }
+  glBindVertexArray(0);
 }
 
 //----------------------------------------

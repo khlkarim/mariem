@@ -1,5 +1,4 @@
 #include "tinyfiledialogs.h"
-#include <limits.h>
 
 #define NOB_IMPLEMENTATION
 #include "nob.h"
@@ -15,16 +14,18 @@
 #include "oui.h"
 
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 // Oui context config
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
 #define WINDOW_TITLE "UNTITLED"
-#define FONT "fonts/Geist-VariableFont_wght.ttf"
+#define FONT "fonts/arial.ttf"
 
 // Miniaudio device config
 #define DEVICE_CHANNELS 2
@@ -35,26 +36,34 @@
 #define DEFAULT_FONT_SIZE 1
 #define DEFAULT_MENU_MARGIN 20
 #define DEFAULT_LINE_HEIGHT 48
-#define DEFAULT_LINK_THICKNESS 6
+#define DEFAULT_LINK_THICKNESS 8
 #define DEFAULT_BORDER_RESOLUTION 50
 #define DEFAULT_TEXT_COLOR OUI_COLOR_WHITE
-#define DEFAULT_NODE_COLOR OUI_COLOR_BLACK
+/*#define DEFAULT_NODE_COLOR OUI_COLOR_BLACK
 #define DEFAULT_LINK_COLOR OUI_COLOR_BLACK
-#define SELECTED_NODE_COLOR OUI_COLOR_WHITE
+#define SELECTED_NODE_COLOR OUI_COLOR_WHITE*/
+
+#define ACSENT_COLOR
+#define DEFAULT_NODE_COLOR OUI_COLOR_WHITE
+#define DEFAULT_LINK_COLOR (OuiColor){150, 150, 150, 200}
+// #define SELECTED_NODE_COLOR (OuiColor){27, 161, 226, 255}
+#define SELECTED_NODE_COLOR (OuiColor){13 + 6 * 16, 2 + 11 * 16, 256, 255} // #6db2ff
 // -------------------- StyleSheet --------------------
 
 // ---------------- Physics Parameters ----------------
-#define DEFAULT_NODE_RADIUS 25
+#define DEFAULT_RESTITUTION 1
+#define DEFAULT_NODE_RADIUS 35
 #define DEFAULT_LINK_ELASTICITY 1.0
 #define DEFAULT_LINK_RESTLENGTH 200
-#define CONSTRAINT_SOLVER_ITERATIONS 1
+#define CONSTRAINT_SOLVER_ITERATIONS 2
 #define DEFAULT_NODE_MASSE 0.1 // this value is used to calculate the inv masse too
 // ---------------- Physics Parameters ----------------
 
 // ----------------------- Misc -----------------------
-#define MAX_ENTITIES 1050
-#define NUM_NODES 1000
+#define MAX_ENTITIES 2050
+#define NUM_NODES 5
 #define DEFAULT_BPM 120
+#define BUFFER_SIZE 128
 // ----------------------- Misc -----------------------
 
 // ------------------ Input Handling ------------------
@@ -109,7 +118,7 @@ typedef enum LinkState {
 } LinkState;
 
 OuiColor link_state_colors[LINK_STATE_COUNT] = {
-    [LINK_STATE_NONE] = OUI_COLOR_WHITE,
+    [LINK_STATE_NONE] = DEFAULT_LINK_COLOR,
     [LINK_STATE_ENABLED] = OUI_COLOR_BLUE,
     [LINK_STATE_DISABLED] = OUI_COLOR_RED,
 };
@@ -133,9 +142,9 @@ typedef struct Entity {
   EntityId edgeB;
   LinkState state;
 
-  char *buffer;
   int isVisible;
   OuiColor color;
+  char buffer[BUFFER_SIZE];
 
   float BPM;
   float hasBeenPlayingFor;
@@ -159,8 +168,19 @@ typedef struct Entity {
 } Entity;
 
 typedef struct EntityManager {
-  Entity entities[MAX_ENTITIES];
   int count;
+  Entity entities[MAX_ENTITIES];
+
+  int countNodes;
+  EntityId nodeIds[MAX_ENTITIES];
+  // at the start of each physics frame, this array gets filled with the ids of all the nodes in the scene
+
+  int collisionLinkedList[MAX_ENTITIES * MAX_ENTITIES];
+  // if i is a node, row i represents a linked list of the other nodes i collides with
+  // the head of the linked list is stored in the cell collisionLinkedList[i][NIL]
+
+  int initialState[MAX_ENTITIES];
+  // this is the initial state of the graph
 
   int assertMatrix[MAX_ENTITIES * MAX_ENTITIES];
   // if i is a link and j is a node
@@ -173,9 +193,6 @@ typedef struct EntityManager {
   // => performMatrix[i * MAX_ENTITIES + j] = the id of the resource that should be attributed to j after i is triggered
   // if i is a link and j is a link
   // => performMatrix[i * MAX_ENTITIES + j] = the state (LinkState) that j should be in after i is triggared
-
-  // this is the initial state of the graph
-  int initialState[MAX_ENTITIES];
 } EntityManager;
 
 EntityId create_entity(EntityManager *entityManager);
@@ -197,6 +214,18 @@ void set_assert_link_link(EntityManager *entityManager, EntityId selectedLinkId,
 void set_perform_link_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId performedLinkId);
 void set_assert_link_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId assertedNodeId, EntityId assertedResourceId);
 void set_perform_link_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId performedNodeId, EntityId performedResourceId);
+
+typedef enum SortAxis {
+  SORT_AXIS_X,
+  SORT_AXIS_Y,
+} SortAxis;
+
+void my_swap(int *a, int *b);
+int heap_pop(EntityManager *entityManager, SortAxis sortAxis);
+void heap_push(EntityManager *entityManager, int val, SortAxis sortAxis);
+int x_axis_comparator(EntityManager *entityManager, EntityId aId, EntityId bId);
+int y_axis_comparator(EntityManager *entityManager, EntityId aId, EntityId bId);
+void heap_sort(EntityManager *entityManager, SortAxis sortAxis);
 // ---------------- Entity Management -----------------
 
 // -------------------- App State ---------------------
@@ -238,21 +267,24 @@ typedef struct AppState {
   EntityId fpsTextLabelId;
   EntityId inputModeTextLabelId;
 
-  // used to create links
   EntityId selectedNodeId;
-  // used for assert and perform statements
+  // used to create links
+
   EntityId selectedLinkId;
+  // used for assert and perform statements
 } AppState;
+
+void clock_tick(Clock *clock);
 
 void init(AppState *app);
 void update(AppState *app);
 void draw(AppState *app);
-void clock_tick(Clock *clock);
+void deinit(AppState **app);
 
 void create_entities(AppState *app);
 EntityId create_node(AppState *app);
-EntityId create_resource(AppState *app, char *fileName); // TODO: who owns the string
 EntityId create_link(AppState *app, EntityId edgeA, EntityId edgeB);
+EntityId create_resource(AppState *app, char *fileName); // TODO: who owns the string
 
 void handle_input(AppState *app);
 void handle_mouse_click(AppState *app);
@@ -268,9 +300,10 @@ void node_mouse_event_handler(AppState *app);
 
 void process_audio(AppState *app);
 
-void apply_physics(AppState *app);
-void apply_forces(AppState *app);
+void handle_physics(AppState *app);
+void detect_collisions(AppState *app);
 void resolve_collisions(AppState *app);
+void apply_forces(AppState *app);
 
 void draw_node(AppState *app, EntityId id);
 void draw_link(AppState *app, EntityId id);
@@ -285,8 +318,8 @@ void draw_resource_manager(AppState *app);
 int main(int argc, char **argv) {
   srand(time(NULL));
 
-  /* if you want to the app to live on the stack
-   * this is not feasible if MAX_ENTITIES exceeds a certain threachold
+  /* if you want the app to live on the stack
+   * (this is not feasible if MAX_ENTITIES exceeds a certain threachold)
    *
    * AppState app = {0};
    * AppState *pApp = &app;
@@ -308,10 +341,8 @@ int main(int argc, char **argv) {
     oui_end_frame(&(pApp->ouiContext));
   }
 
-  oui_context_destroy(&(pApp->ouiContext));
-
   // remove me when living on the stack
-  free(pApp);
+  deinit(&pApp);
 
   (void)argc;
   (void)argv;
@@ -371,7 +402,7 @@ void update(AppState *app) {
   clock_tick(clock);
 
   handle_input(app);
-  apply_physics(app);
+  handle_physics(app);
   process_audio(app);
   // TODO: compute layout here for example (right before drawing)
 }
@@ -397,6 +428,18 @@ void draw(AppState *app) {
   draw_brush(app);
   draw_input_mode(app);
   draw_resource_manager(app);
+}
+
+void deinit(AppState **app) {
+  if (app == NULL || *app == NULL) {
+    return;
+  }
+
+  oui_context_destroy(&((*app)->ouiContext));
+  ma_engine_uninit(&((*app)->audioEngine));
+
+  free(*app);
+  *app = NULL;
 }
 
 void handle_input(AppState *app) {
@@ -571,19 +614,48 @@ void resource_manager_click_handler(AppState *app) {
         mousePos.y >= buttonCenter.y - buttonHeight / 2 &&
         mousePos.y <= buttonCenter.y + buttonHeight / 2) {
 
+      // TODO: get the file from a different thread
       char *title = "Add sound";
-      char *fileName = tinyfd_openFileDialog(
-          title,
-          NULL,
-          0,
-          NULL,
-          NULL,
-          0);
 
-      // TODO: the filename will be freed when another file is selected
-      nob_log(NOB_INFO, "selected file: %s", fileName);
-      if (fileName) {
-        create_resource(app, fileName);
+      size_t size;
+      long path_max;
+      path_max = pathconf(".", _PC_PATH_MAX);
+      if (path_max == -1)
+        size = 1024;
+      else if (path_max > 10240)
+        size = 10240;
+      else
+        size = path_max;
+
+      char *buf;
+      char *ptr;
+
+      for (buf = ptr = NULL; ptr == NULL; size *= 2) {
+        if ((buf = realloc(buf, size)) == NULL) {
+          break;
+        }
+
+        ptr = getcwd(buf, size);
+        if (ptr == NULL && errno != ERANGE) {
+          break;
+        }
+      }
+
+      if (buf != NULL) {
+        nob_log(NOB_INFO, "cwd: %s", buf);
+
+        char *fileName = tinyfd_openFileDialog(
+            title,
+            buf,
+            0,
+            NULL,
+            NULL,
+            0);
+
+        nob_log(NOB_INFO, "selected file: %s", fileName);
+        if (fileName) {
+          create_resource(app, fileName);
+        }
       }
 
       return;
@@ -931,9 +1003,160 @@ void brush_mouse_event_handler(AppState *app) {
   }
 }
 
-void apply_physics(AppState *app) {
-  apply_forces(app);
+void handle_physics(AppState *app) {
+  detect_collisions(app);
   resolve_collisions(app);
+  apply_forces(app);
+}
+
+void flag_collision_x_axis(AppState *app, EntityId aId, EntityId bId) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  // add bId to the linked list on aId's row
+  entityManager->collisionLinkedList[aId * MAX_ENTITIES + bId] = entityManager->collisionLinkedList[aId * MAX_ENTITIES];
+  entityManager->collisionLinkedList[aId * MAX_ENTITIES] = bId;
+
+  // add aId to the linked list on bId's row
+  entityManager->collisionLinkedList[bId * MAX_ENTITIES + aId] = entityManager->collisionLinkedList[bId * MAX_ENTITIES];
+  entityManager->collisionLinkedList[bId * MAX_ENTITIES] = aId;
+}
+
+void detect_collisions(AppState *app) {
+  if (
+      app == NULL ||
+      app->togglePhysics == OFF) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  entityManager->countNodes = 0;
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_NODE) {
+      entityManager->nodeIds[entityManager->countNodes++] = i;
+      entityManager->collisionLinkedList[i * MAX_ENTITIES] = NIL;
+    }
+  }
+
+  heap_sort(entityManager, SORT_AXIS_X);
+
+  // broad phase
+  // TODO: sliding window: if a is behind you and you intersect with it, then you intersect will all the elements between you and a
+  for (int i = 0; i < entityManager->countNodes - 1; i++) {
+    for (int j = i + 1; j < entityManager->countNodes; j++) {
+      EntityId aId = entityManager->nodeIds[i];
+      EntityId bId = entityManager->nodeIds[j];
+
+      Entity *e1 = get_entity(entityManager, aId);
+      Entity *e2 = get_entity(entityManager, bId);
+
+      if (fabs(e1->position.x - e2->position.x) <= e1->radius + e2->radius) {
+        flag_collision_x_axis(app, aId, bId);
+      } else {
+        break;
+      }
+    }
+  }
+
+  // narrow phase
+  for (int i = 0; i < entityManager->countNodes; i++) {
+    EntityId id = entityManager->nodeIds[i];
+    Entity *e1 = get_entity(entityManager, id);
+
+    EntityId prevId = NIL;
+    EntityId currId = entityManager->collisionLinkedList[id * MAX_ENTITIES];
+
+    while (currId != NIL) {
+      Entity *e2 = get_entity(entityManager, currId);
+
+      NtVec2f delta = nwt_sub(e1->position, e2->position);
+      float deltaLength = nwt_length(delta);
+
+      float r1 = e1->radius;
+      float r2 = e2->radius;
+      float restLength = r1 + r2;
+
+      if (deltaLength <= restLength) {
+        entityManager->collisionLinkedList[id * MAX_ENTITIES + prevId] = currId;
+        prevId = currId;
+      }
+
+      currId = entityManager->collisionLinkedList[id * MAX_ENTITIES + currId];
+    }
+    entityManager->collisionLinkedList[id * MAX_ENTITIES + prevId] = NIL;
+  }
+}
+
+void resolve_collisions(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  float containerWidth = windowWidth;
+  float containerHeight = windowHeight;
+
+  int numIterations = CONSTRAINT_SOLVER_ITERATIONS;
+  for (int iter = 0; iter < numIterations; iter++) {
+    for (int i = 0; i < entityManager->countNodes; i++) {
+      EntityId id = entityManager->nodeIds[i];
+      Entity *e = get_entity(entityManager, id);
+
+      if (e->type != ENTITY_TYPE_NODE)
+        continue;
+
+      e->position.x = oui_max(oui_min(e->position.x, containerWidth / 2 - e->radius), -containerWidth / 2 + e->radius);
+      e->position.y = oui_max(oui_min(e->position.y, containerHeight / 2 - e->radius), -containerHeight / 2 + e->radius);
+    }
+
+    for (int i = 0; i < entityManager->countNodes; i++) {
+      EntityId id = entityManager->nodeIds[i];
+      Entity *e1 = get_entity(entityManager, id);
+
+      EntityId currId = entityManager->collisionLinkedList[id * MAX_ENTITIES];
+
+      while (currId != NIL) {
+        Entity *e2 = get_entity(entityManager, currId);
+
+        NtVec2f delta = nwt_sub(e1->position, e2->position);
+        float deltaLength = nwt_length(delta);
+
+        float r1 = e1->radius;
+        float r2 = e2->radius;
+        float restLength = r1 + r2;
+
+        if (deltaLength == 0) {
+          NtVec2f randomDisplacement = {
+              .x = DEFAULT_NODE_RADIUS * ((float)rand() / INT_MAX),
+              .y = DEFAULT_NODE_RADIUS * ((float)rand() / INT_MAX),
+          };
+
+          e1->position = nwt_add(e1->position, randomDisplacement);
+          e2->position = nwt_add(e2->position, nwt_mult_s(randomDisplacement, -1));
+        } else if (deltaLength < restLength) {
+          // if i dont do this it the velocities dont get calculated correctly
+          // why?? (maybe because the apply_forces function doesnt check if the nodes are about to seperate)
+          float posError = (deltaLength - restLength) * 0.5;
+          e1->position = nwt_sub(e1->position, nwt_mult_s(delta, posError / deltaLength));
+          e2->position = nwt_add(e2->position, nwt_mult_s(delta, posError / deltaLength));
+        }
+
+        currId = entityManager->collisionLinkedList[id * MAX_ENTITIES + currId];
+      }
+    }
+  }
 }
 
 void apply_forces(AppState *app) {
@@ -954,32 +1177,53 @@ void apply_forces(AppState *app) {
   float containerWidth = windowWidth;
   float containerHeight = windowHeight;
 
-  // collision forces
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e1 = get_entity(entityManager, i);
+  // apply link forces
+  for (int j = 1; j < entityManager->count; j++) {
+    Entity *e = get_entity(entityManager, j);
 
-    if (e1->type != ENTITY_TYPE_NODE)
+    if (e->type != ENTITY_TYPE_LINK)
       continue;
+
+    Entity *a = get_entity(entityManager, e->edgeA);
+    Entity *b = get_entity(entityManager, e->edgeB);
+
+    float restLength = e->restLength;
+    NtVec2f delta = nwt_sub(a->position, b->position);
+    float deltaLength = nwt_distance(a->position, b->position);
+
+    // TODO: implement force damping
+    if (deltaLength != restLength) {
+      float posError = (deltaLength - restLength) * 0.5;
+
+      NtVec2f springForceA = nwt_mult_s(delta, -e->elasticity * posError / deltaLength);
+      NtVec2f springForceB = nwt_mult_s(delta, e->elasticity * posError / deltaLength);
+
+      a->force = nwt_add(a->force, springForceA);
+      b->force = nwt_add(b->force, springForceB);
+    }
+  }
+
+  for (int i = 0; i < entityManager->countNodes; i++) {
+    EntityId id = entityManager->nodeIds[i];
+    Entity *e1 = get_entity(entityManager, id);
 
     // wall collisions
     float r = e1->radius;
 
-    if ((e1->position.x - r < -containerWidth / 2 && e1->velocity.x < 0) ||
-        (e1->position.x + r > containerWidth / 2 && e1->velocity.x > 0)) {
+    if ((e1->position.x <= -containerWidth / 2 + r && e1->velocity.x < 0) ||
+        (e1->position.x >= containerWidth / 2 - r && e1->velocity.x > 0)) {
       e1->velocity.x *= -1;
     }
 
-    if ((e1->position.y - r < -containerHeight / 2 && e1->velocity.y < 0) ||
-        (e1->position.y + r > containerHeight / 2 && e1->velocity.y > 0)) {
+    if ((e1->position.y <= -containerHeight / 2 + r && e1->velocity.y < 0) ||
+        (e1->position.y >= containerHeight / 2 - r && e1->velocity.y > 0)) {
       e1->velocity.y *= -1;
     }
 
-    // node on node violence
-    for (int j = i + 1; j < entityManager->count; j++) {
-      Entity *e2 = get_entity(entityManager, j);
+    EntityId currId = entityManager->collisionLinkedList[id * MAX_ENTITIES];
 
-      if (e2->type != ENTITY_TYPE_NODE)
-        continue;
+    while (currId != NIL) {
+      Entity *e2 = get_entity(entityManager, currId);
 
       NtVec2f delta = nwt_sub(e1->position, e2->position);
       float deltaLength = nwt_length(delta);
@@ -988,8 +1232,8 @@ void apply_forces(AppState *app) {
       float r2 = e2->radius;
       float restLength = r1 + r2;
 
-      if (deltaLength < restLength) {
-        float e = 1.0;
+      if (deltaLength <= restLength) {
+        float e = DEFAULT_RESTITUTION;
         float m1 = e1->masse, m2 = e2->masse;
         NtVec2f u1 = e1->velocity, u2 = e2->velocity;
         NtVec2f p1 = e1->position, p2 = e2->position;
@@ -997,11 +1241,13 @@ void apply_forces(AppState *app) {
 
         // formula source: https://www.youtube.com/watch?v=zJLTEt_JFYg
         float coef1 = ((1 + e) * m2 / ((m1 + m2) * restLength)) * nwt_dot(nwt_sub(u2, u1), nwt_sub(p1, p2));
-        float coef2 = ((1 + e) * m1 / ((m1 + m2) * restLength)) * nwt_dot(nwt_sub(u1, u2), nwt_sub(p2, p1));
+        // float coef2 = ((1 + e) * m1 / ((m1 + m2) * restLength)) * nwt_dot(nwt_sub(u1, u2), nwt_sub(p2, p1));
 
         e1->velocity = nwt_add(e1->velocity, nwt_mult_s(n, coef1));
-        e2->velocity = nwt_add(e2->velocity, nwt_mult_s(n, -coef2));
+        //  e2->velocity = nwt_add(e2->velocity, nwt_mult_s(n, -coef2));
       }
+
+      currId = entityManager->collisionLinkedList[id * MAX_ENTITIES + currId];
     }
 
     e1->velocity = nwt_add(e1->velocity, nwt_mult_s(e1->force, e1->invMasse * dt));
@@ -1010,101 +1256,144 @@ void apply_forces(AppState *app) {
   }
 }
 
-void resolve_collisions(AppState *app) {
-  if (
-      app == NULL ||
-      app->togglePhysics == OFF) {
+void heap_push(EntityManager *entityManager, int val, SortAxis sortAxis) {
+  if (entityManager->countNodes >= MAX_ENTITIES) {
+    nob_log(NOB_WARNING, "Can't push into heap, capacity exceeded, count: %d\n", entityManager->count);
     return;
   }
 
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
+  int curr = entityManager->countNodes;
+  entityManager->countNodes++;
 
-  int numIterations = CONSTRAINT_SOLVER_ITERATIONS;
+  // insert the value at the end of the heap
+  entityManager->nodeIds[curr] = val;
+  // nob_log(NOB_INFO, "Pushing: %d", val);
 
-  float windowWidth, windowHeight;
-  windowWidth = oui_get_window_width(ouiContext);
-  windowHeight = oui_get_window_height(ouiContext);
+  if (sortAxis == SORT_AXIS_X) {
+    while (
+        // while the element has a parent, compare with it
+        // if parent is bigger swap => smallest to the top => min heap
+        curr > 0 &&
+        x_axis_comparator(entityManager, curr, (int)(curr / 2))) {
+      my_swap(&(entityManager->nodeIds[curr]), &(entityManager->nodeIds[(int)(curr / 2)]));
+      curr /= 2;
+    }
+  } else {
+    while (
+        // while the element has a parent, compare with it
+        // if parent is bigger swap => smallest to the top => min heap
+        curr > 0 &&
+        y_axis_comparator(entityManager, curr, (int)(curr / 2))) {
+      my_swap(&(entityManager->nodeIds[curr]), &(entityManager->nodeIds[(int)(curr / 2)]));
+      curr /= 2;
+    }
+  }
+}
 
-  float containerWidth = windowWidth;
-  float containerHeight = windowHeight;
+int heap_pop(EntityManager *entityManager, SortAxis sortAxis) {
+  if (entityManager == NULL || entityManager->countNodes == 0) {
+    return NIL;
+  }
 
-  for (int i = 0; i < numIterations; i++) {
-    // first constraint
-    for (int j = 1; j < entityManager->count; j++) {
-      Entity *e = get_entity(entityManager, j);
+  // bring the last element to the front
+  int val = entityManager->nodeIds[0];
+  entityManager->nodeIds[0] = entityManager->nodeIds[entityManager->countNodes - 1];
+  entityManager->countNodes--;
 
-      if (e->type != ENTITY_TYPE_NODE)
-        continue;
+  int curr = 0;
+  while (curr < entityManager->countNodes) {
+    int curr_left = curr * 2;
+    int curr_right = curr * 2 + 1;
 
-      e->position.x = oui_max(oui_min(e->position.x, containerWidth / 2), -containerWidth / 2);
-      e->position.y = oui_max(oui_min(e->position.y, containerHeight / 2), -containerHeight / 2);
+    // while you have children
+    if (curr_left >= entityManager->countNodes) {
+      break;
     }
 
-    // second constraint
-    for (int j = 1; j < entityManager->count; j++) {
-      Entity *e1 = get_entity(entityManager, j);
-
-      if (e1->type != ENTITY_TYPE_NODE)
-        continue;
-
-      /*  for (int k = j + 1; k < entityManager->count; k++) {
-          Entity *e2 = get_entity(entityManager, k);
-
-          if (e2->type != ENTITY_TYPE_NODE)
-            continue;
-
-          NtVec2f delta = nwt_sub(e1->position, e2->position);
-          float deltaLength = nwt_length(delta);
-
-          float r1 = e1->radius;
-          float r2 = e2->radius;
-          float restLength = r1 + r2;
-
-          if (deltaLength == 0) {
-            float randomDisplacementAmplitude = 10;
-            NtVec2f randomDisplacement = {
-                .x = randomDisplacementAmplitude * ((float)rand() / INT_MAX),
-                .y = randomDisplacementAmplitude * ((float)rand() / INT_MAX),
-            };
-
-            e1->position = nwt_add(e1->position, randomDisplacement);
-            e2->position = nwt_add(e2->position, nwt_mult_s(randomDisplacement, -1));
-          } else if (deltaLength < restLength) {
-            // if i dont do this it the velocities dont get calculated correctly
-            // why??
-            float posError = (deltaLength - restLength) * 0.5;
-            e1->position = nwt_sub(e1->position, nwt_mult_s(delta, posError / deltaLength));
-            e2->position = nwt_add(e2->position, nwt_mult_s(delta, posError / deltaLength));
-          }
-        }*/
+    int curr_next = curr_left;
+    if (curr_right < entityManager->countNodes) {
+      if (sortAxis == SORT_AXIS_X) {
+        curr_next = x_axis_comparator(entityManager, curr_left, curr_right) ? curr_next : curr_right;
+      } else {
+        curr_next = y_axis_comparator(entityManager, curr_left, curr_right) ? curr_next : curr_right;
+      }
     }
 
-    for (int j = 1; j < entityManager->count; j++) {
-      Entity *e = get_entity(entityManager, j);
-
-      if (e->type != ENTITY_TYPE_LINK)
-        continue;
-
-      Entity *a = get_entity(entityManager, e->edgeA);
-      Entity *b = get_entity(entityManager, e->edgeB);
-
-      float restLength = e->restLength;
-      NtVec2f delta = nwt_sub(a->position, b->position);
-      float deltaLength = nwt_distance(a->position, b->position);
-
-      // TODO: implement force damping
-      if (deltaLength != restLength) {
-        float posError = (deltaLength - restLength) * 0.5;
-
-        NtVec2f springForceA = nwt_mult_s(delta, -e->elasticity * posError / deltaLength);
-        NtVec2f springForceB = nwt_mult_s(delta, e->elasticity * posError / deltaLength);
-
-        a->force = nwt_add(a->force, springForceA);
-        b->force = nwt_add(b->force, springForceB);
+    if (sortAxis == SORT_AXIS_X) {
+      // if ur child is smaller swap
+      if (x_axis_comparator(entityManager, curr_next, curr)) {
+        my_swap(&(entityManager->nodeIds[curr]), &(entityManager->nodeIds[curr_next]));
+        curr = curr_next;
+      } else {
+        break;
+      }
+    } else {
+      // if ur child is smaller swap
+      if (y_axis_comparator(entityManager, curr_next, curr)) {
+        my_swap(&(entityManager->nodeIds[curr]), &(entityManager->nodeIds[curr_next]));
+        curr = curr_next;
+      } else {
+        break;
       }
     }
   }
+
+  return val;
+}
+
+void heap_sort(EntityManager *entityManager, SortAxis sortAxis) {
+  if (entityManager == NULL) {
+    return;
+  }
+
+  int n = entityManager->countNodes;
+  int items[n];
+
+  for (int i = 0; i < n; i++) {
+    items[i] = entityManager->nodeIds[i];
+  }
+
+  entityManager->countNodes = 0;
+  for (int i = 0; i < n; i++) {
+    heap_push(entityManager, items[i], sortAxis);
+  }
+
+  for (int i = 0; i < n; i++) {
+    items[i] = heap_pop(entityManager, sortAxis);
+  }
+
+  entityManager->countNodes = n;
+  for (int i = 0; i < n; i++) {
+    entityManager->nodeIds[i] = items[i];
+  }
+}
+
+int x_axis_comparator(EntityManager *entityManager, EntityId aId, EntityId bId) {
+  if (entityManager == NULL) {
+    return 1;
+  }
+
+  Entity *a = get_entity(entityManager, entityManager->nodeIds[aId]);
+  Entity *b = get_entity(entityManager, entityManager->nodeIds[bId]);
+
+  return a->position.x < b->position.x;
+}
+
+int y_axis_comparator(EntityManager *entityManager, EntityId aId, EntityId bId) {
+  if (entityManager == NULL) {
+    return 1;
+  }
+
+  Entity *a = get_entity(entityManager, entityManager->nodeIds[aId]);
+  Entity *b = get_entity(entityManager, entityManager->nodeIds[bId]);
+
+  return a->position.y < b->position.y;
+}
+
+void my_swap(int *a, int *b) {
+  int temp = *b;
+  *b = *a;
+  *a = temp;
 }
 
 void process_audio(AppState *app) {
@@ -1233,8 +1522,8 @@ void create_entities(AppState *app) {
     e->type = ENTITY_TYPE_NODE;
 
     e->radius = radius;
-    e->position.x = rand() % (int)windowWidth - windowWidth / 2;
-    e->position.y = rand() % (int)windowHeight - windowHeight / 2;
+    e->position.x = rand() % (2 * (int)windowWidth) - windowWidth;
+    e->position.y = rand() % (2 * (int)windowHeight) - windowHeight;
 
     e->velocity.x = rand() % 200 - 100;
     e->velocity.y = rand() % 200 - 100;
@@ -1260,7 +1549,6 @@ void create_entities(AppState *app) {
   brush->isVisible = 1;
   brush->radius = 10;
   brush->color = OUI_COLOR_BLACK;
-  brush->color.a = 100;
   brush->width = 400;
   brush->height = 100;
   brush->paddingLeft = 10;
@@ -1271,7 +1559,6 @@ void create_entities(AppState *app) {
   Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
   resourceManager->radius = 10;
   resourceManager->color = OUI_COLOR_BLACK;
-  resourceManager->color.a = 100;
   resourceManager->marginTop = 20;
   resourceManager->marginLeft = 20;
   resourceManager->marginRight = 20;
@@ -1312,6 +1599,17 @@ EntityId create_link(AppState *app, EntityId a, EntityId b) {
 
   EntityManager *entityManager = &(app->entityManager);
 
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_LINK) {
+      if (e->edgeA == a && e->edgeB == b) {
+        nob_log(NOB_WARNING, "Link already exists");
+        return NIL;
+      }
+    }
+  }
+
   EntityId linkId = create_entity(entityManager);
   Entity *link = get_entity(entityManager, linkId);
 
@@ -1336,7 +1634,8 @@ EntityId create_resource(AppState *app, char *fileName) {
   Entity *resource = get_entity(entityManager, resourceId);
 
   resource->type = ENTITY_TYPE_RESOURCE;
-  resource->buffer = fileName; // TODO: use after free?
+  snprintf(resource->buffer, BUFFER_SIZE, "%s", fileName);
+  // resource->buffer = fileName; // TODO: use after free?
   resource->color = (OuiColor){
       .r = rand() % 256,
       .g = rand() % 256,
@@ -1388,21 +1687,23 @@ void draw_fps(AppState *app) {
 
   const int bufferSize = 32;
   char fpsString[bufferSize];
-  snprintf(fpsString, bufferSize, "%.2f FPS", 1 / clock->dt);
+  // snprintf(fpsString, bufferSize, "%.2f FPS", 1 / clock->dt);
 
   float windowWidth, windowHeight;
   windowWidth = oui_get_window_width(ouiContext);
   windowHeight = oui_get_window_height(ouiContext);
 
   Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
+  snprintf(fpsTextLabel->buffer, BUFFER_SIZE, "%.2f FPS", 1 / clock->dt);
 
-  int fpsStringLength = strlen(fpsString);
+  // int fpsStringLength = strlen(fpsString);
+  int fpsStringLength = strlen(fpsTextLabel->buffer);
   fpsTextLabel->position.y = (float)windowHeight / 2 - marginTop;
   fpsTextLabel->position.x = (float)windowWidth / 2 - characterWidth * fpsStringLength - marginRight;
 
-  fpsTextLabel->buffer = fpsString;
+  // fpsTextLabel->buffer = fpsString;
   draw_label(app, app->fpsTextLabelId);
-  fpsTextLabel->buffer = NULL;
+  // fpsTextLabel->buffer = NULL;
 }
 
 void draw_input_mode(AppState *app) {
@@ -1418,6 +1719,7 @@ void draw_input_mode(AppState *app) {
 
   const int bufferSize = 32;
   char inputModeString[bufferSize];
+  // snprintf(inputModeString, bufferSize, "%s", input_mode_labels[app->inputMode]);
   snprintf(inputModeString, bufferSize, "%s", input_mode_labels[app->inputMode]);
 
   float windowWidth, windowHeight;
@@ -1425,13 +1727,14 @@ void draw_input_mode(AppState *app) {
   windowHeight = oui_get_window_height(ouiContext);
 
   Entity *inputModeTextLabel = get_entity(entityManager, app->inputModeTextLabelId);
+  snprintf(inputModeTextLabel->buffer, BUFFER_SIZE, "%s", input_mode_labels[app->inputMode]);
 
   inputModeTextLabel->position.x = -(float)windowWidth / 2 + marginLeft;
   inputModeTextLabel->position.y = (float)windowHeight / 2 - marginTop;
 
-  inputModeTextLabel->buffer = inputModeString;
+  // inputModeTextLabel->buffer = inputModeString;
   draw_label(app, app->inputModeTextLabelId);
-  inputModeTextLabel->buffer = NULL;
+  // inputModeTextLabel->buffer = NULL;
 }
 
 void draw_node(AppState *app, EntityId id) {
@@ -1488,7 +1791,22 @@ void draw_node(AppState *app, EntityId id) {
     }
   }
 
+  float characterWidth = 30;
+  float lineHeight = 35;
+  OuiText text = {0};
+  snprintf(e->buffer, BUFFER_SIZE, "%d", id);
+  text.startPos.x = rectangle.centerPos.x - characterWidth / 2;
+  text.startPos.y = rectangle.centerPos.y - lineHeight / 2;
+  text.fontColor = OUI_COLOR_BLACK;
+  text.fontSize = DEFAULT_FONT_SIZE;
+  text.lineHeight = DEFAULT_LINE_HEIGHT;
+  text.maxLineWidth = 100;
+
   oui_draw_rectangle(ouiContext, &rectangle);
+
+  text.content = e->buffer;
+  oui_draw_text(ouiContext, &text);
+  text.content = NULL;
 }
 
 void draw_link(AppState *app, EntityId id) {
@@ -1539,6 +1857,7 @@ void draw_link(AppState *app, EntityId id) {
   };
 
   rectangle.borderRadius = 0;
+  rectangle.borderRadius = arrowBorderRadius;
   rectangle.borderResolution = 0;
 
   if (id == selectedLinkId) {
@@ -1563,7 +1882,7 @@ void draw_link(AppState *app, EntityId id) {
   // Draw the arrow
   rectangle.width = arrowSize;
   rectangle.height = DEFAULT_LINK_THICKNESS;
-  rectangle.borderRadius = arrowBorderRadius;
+  // rectangle.borderRadius = arrowBorderRadius;
 
   // the direction orthogonal to the current link direction (normalizedDiff rotated by 90 degrees)
   NtVec2f orthogonal = {
@@ -1574,14 +1893,14 @@ void draw_link(AppState *app, EntityId id) {
   // rotation relative to the current link direction
   rectangle.rotationXY += -NT_PI / 4;
 
-  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2) - 5 * orthogonal.x;
-  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2) - 5 * orthogonal.y;
+  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.x;
+  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.y;
   oui_draw_rectangle(ouiContext, &rectangle);
 
   // rotation relative to the current link direction
   rectangle.rotationXY += NT_PI / 2;
-  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2) + 5 * orthogonal.x;
-  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2) + 5 * orthogonal.y;
+  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.x;
+  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.y;
   oui_draw_rectangle(ouiContext, &rectangle);
   // Draw the arrow
 }
@@ -1615,6 +1934,10 @@ void draw_brush(AppState *app) {
 
   EntityId resourceManagerId = app->resourceManagerId;
   Entity *resourceManager = get_entity(entityManager, resourceManagerId);
+
+  if (resourceManager->firstChild == NIL) {
+    return;
+  }
 
   OuiRectangle rectangle = {0};
 
