@@ -34,7 +34,7 @@
 
 // -------------------- StyleSheet --------------------
 #define DEFAULT_FONT_SIZE 1
-#define DEFAULT_MENU_MARGIN 20
+#define DEFAULT_MENU_MARGIN 150
 #define DEFAULT_LINE_HEIGHT 48
 #define DEFAULT_LINK_THICKNESS 8
 #define DEFAULT_BORDER_RESOLUTION 50
@@ -43,7 +43,8 @@
 #define DEFAULT_LINK_COLOR OUI_COLOR_BLACK
 #define SELECTED_NODE_COLOR OUI_COLOR_WHITE*/
 
-#define ACSENT_COLOR
+#define ACSENT_COLOR (OuiColor){59, 128, 206, 255} // #6db2ff
+// #define ACSENT_COLOR (OuiColor){255, 255, 255, 255} // #6db2ff
 #define DEFAULT_NODE_COLOR OUI_COLOR_WHITE
 #define DEFAULT_LINK_COLOR (OuiColor){150, 150, 150, 200}
 // #define SELECTED_NODE_COLOR (OuiColor){27, 161, 226, 255}
@@ -54,14 +55,14 @@
 #define DEFAULT_RESTITUTION 1
 #define DEFAULT_NODE_RADIUS 35
 #define DEFAULT_LINK_ELASTICITY 1.0
-#define DEFAULT_LINK_RESTLENGTH 200
+#define DEFAULT_LINK_RESTLENGTH 300
 #define CONSTRAINT_SOLVER_ITERATIONS 2
 #define DEFAULT_NODE_MASSE 0.1 // this value is used to calculate the inv masse too
 // ---------------- Physics Parameters ----------------
 
 // ----------------------- Misc -----------------------
 #define MAX_ENTITIES 2050
-#define NUM_NODES 5
+#define NUM_NODES 0
 #define DEFAULT_BPM 120
 #define BUFFER_SIZE 128
 // ----------------------- Misc -----------------------
@@ -479,7 +480,7 @@ void handle_key_bindings(AppState *app) {
     if (app->selectedNodeId) {
       delete_entity(entityManager, app->selectedNodeId);
       app->selectedNodeId = NIL;
-    } else if (app->selectedNodeId) {
+    } else if (app->selectedLinkId) {
       delete_entity(entityManager, app->selectedLinkId);
       app->selectedLinkId = NIL;
     }
@@ -601,7 +602,7 @@ void resource_manager_click_handler(AppState *app) {
 
     // check if the user clicked the add sound button
     float buttonHeight = 100;
-    float buttonWidth = windowWidth - margin - paddingLeftRight;
+    float buttonWidth = windowWidth - 2 * margin - 2 * paddingLeftRight;
 
     NtVec2f buttonCenter = {
         .x = 0,
@@ -899,15 +900,40 @@ void node_mouse_event_handler(AppState *app) {
   // if there is an active drag event
   // the selected nodes will be affected by it
   if (state == HELD) {
-    Entity *e = get_entity(entityManager, app->selectedNodeId);
-    float dragSpeed = 10 * dt * 1000;
+    /* Entity *e = get_entity(entityManager, app->selectedNodeId);
+     float dragSpeed = 10 * dt * 1000;
 
-    NtVec2f dir = nwt_sub(mousePos, e->position);
-    float dirLength = nwt_length(dir);
+     NtVec2f dir = nwt_sub(mousePos, e->position);
+     float dirLength = nwt_length(dir);
 
-    if (dirLength > 0) {
-      dir = nwt_div_s(dir, dirLength);
-      e->force = nwt_add(e->force, nwt_mult_s(dir, dragSpeed));
+     if (dirLength > 0) {
+       dir = nwt_div_s(dir, dirLength);
+       e->force = nwt_add(e->force, nwt_mult_s(dir, dragSpeed));
+     }*/
+
+    if (app->selectedNodeId != NIL) {
+      NtVec2f mousePos = get_mouse_position(&app->ouiContext);
+      Entity *selectedNode = get_entity(entityManager, app->selectedNodeId);
+
+      float restLength = 0;
+      float elasticity = 5;
+
+      NtVec2f delta = nwt_sub(selectedNode->position, mousePos);
+      float deltaLength = nwt_length(delta);
+
+      if (deltaLength != restLength) {
+        float posError = (deltaLength - restLength) * 0.5;
+
+        NtVec2f springForceA = nwt_mult_s(delta, -elasticity * posError / deltaLength);
+        //      NtVec2f springForceB = nwt_mult_s(delta, elasticity * posError / deltaLength);
+
+        selectedNode->force = nwt_add(selectedNode->force, springForceA);
+
+        // damping force : https://phys.libretexts.org/Courses/University_of_California_Davis/UCD%3A_Physics_9HA__Classical_Mechanics/8%3A_Small_Oscillations/8.3%3A_Damping_and_Resonance
+        float damp = 0.5;
+        selectedNode->force = nwt_add(selectedNode->force, nwt_mult_s(selectedNode->velocity, -damp));
+        //      b->force = nwt_add(b->force, nwt_mult_s(b->velocity, -damp));
+      }
     }
   }
   // if there is a click event, find the clicked node
@@ -1003,9 +1029,28 @@ void brush_mouse_event_handler(AppState *app) {
   }
 }
 
+void dump_physics_state(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  /*EntityManager *entityManager = &(app->entityManager);
+
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_NODE) {
+      nob_log(NOB_INFO, "NODE::%d::POSITION::{%f,%f}", i, e->position.x, e->position.y);
+      nob_log(NOB_INFO, "NODE::%d::VELOCITY::{%f,%f}", i, e->velocity.x, e->velocity.y);
+      nob_log(NOB_INFO, "NODE::%d::FORCE::{%f,%f}", i, e->force.x, e->force.y);
+    }
+  }*/
+}
+
 void handle_physics(AppState *app) {
   detect_collisions(app);
   resolve_collisions(app);
+  dump_physics_state(app);
   apply_forces(app);
 }
 
@@ -1191,7 +1236,6 @@ void apply_forces(AppState *app) {
     NtVec2f delta = nwt_sub(a->position, b->position);
     float deltaLength = nwt_distance(a->position, b->position);
 
-    // TODO: implement force damping
     if (deltaLength != restLength) {
       float posError = (deltaLength - restLength) * 0.5;
 
@@ -1200,6 +1244,11 @@ void apply_forces(AppState *app) {
 
       a->force = nwt_add(a->force, springForceA);
       b->force = nwt_add(b->force, springForceB);
+
+      // damping force : https://phys.libretexts.org/Courses/University_of_California_Davis/UCD%3A_Physics_9HA__Classical_Mechanics/8%3A_Small_Oscillations/8.3%3A_Damping_and_Resonance
+      float damp = 0.1;
+      a->force = nwt_add(a->force, nwt_mult_s(a->velocity, -damp));
+      b->force = nwt_add(b->force, nwt_mult_s(b->velocity, -damp));
     }
   }
 
@@ -1241,14 +1290,17 @@ void apply_forces(AppState *app) {
 
         // formula source: https://www.youtube.com/watch?v=zJLTEt_JFYg
         float coef1 = ((1 + e) * m2 / ((m1 + m2) * restLength)) * nwt_dot(nwt_sub(u2, u1), nwt_sub(p1, p2));
-        // float coef2 = ((1 + e) * m1 / ((m1 + m2) * restLength)) * nwt_dot(nwt_sub(u1, u2), nwt_sub(p2, p1));
+        float coef2 = ((1 + e) * m1 / ((m1 + m2) * restLength)) * nwt_dot(nwt_sub(u1, u2), nwt_sub(p2, p1));
 
-        e1->velocity = nwt_add(e1->velocity, nwt_mult_s(n, coef1));
-        //  e2->velocity = nwt_add(e2->velocity, nwt_mult_s(n, -coef2));
+        e1->velocity = nwt_add(e1->velocity, nwt_mult_s(n, coef1)); // TODO: am i applying the force twice?
+        e2->velocity = nwt_add(e2->velocity, nwt_mult_s(n, -coef2));
       }
 
       currId = entityManager->collisionLinkedList[id * MAX_ENTITIES + currId];
     }
+
+    float friction = -0.3;
+    e1->force = nwt_add(e1->force, nwt_mult_s(e1->velocity, friction));
 
     e1->velocity = nwt_add(e1->velocity, nwt_mult_s(e1->force, e1->invMasse * dt));
     e1->position = nwt_add(e1->position, nwt_mult_s(e1->velocity, dt));
@@ -1669,7 +1721,16 @@ void draw_label(AppState *app, EntityId id) {
   text.content = e->buffer;
   text.fontColor = DEFAULT_TEXT_COLOR;
 
+  OuiRectangle rectangle = oui_get_text_hitbox(ouiContext, &text);
+
+  rectangle.width += 50;
+  rectangle.height += 40;
+  rectangle.borderRadius = 15;
+  rectangle.backgroundColor = ACSENT_COLOR;
+  oui_draw_rectangle(ouiContext, &rectangle);
+
   oui_draw_text(ouiContext, &text);
+  text.content = NULL;
 }
 
 void draw_fps(AppState *app) {
@@ -1682,12 +1743,8 @@ void draw_fps(AppState *app) {
   EntityManager *entityManager = &(app->entityManager);
 
   float marginTop = 50;
-  float marginRight = 15;
+  float marginRight = 20;
   float characterWidth = 25;
-
-  const int bufferSize = 32;
-  char fpsString[bufferSize];
-  // snprintf(fpsString, bufferSize, "%.2f FPS", 1 / clock->dt);
 
   float windowWidth, windowHeight;
   windowWidth = oui_get_window_width(ouiContext);
@@ -1696,14 +1753,11 @@ void draw_fps(AppState *app) {
   Entity *fpsTextLabel = get_entity(entityManager, app->fpsTextLabelId);
   snprintf(fpsTextLabel->buffer, BUFFER_SIZE, "%.2f FPS", 1 / clock->dt);
 
-  // int fpsStringLength = strlen(fpsString);
   int fpsStringLength = strlen(fpsTextLabel->buffer);
   fpsTextLabel->position.y = (float)windowHeight / 2 - marginTop;
   fpsTextLabel->position.x = (float)windowWidth / 2 - characterWidth * fpsStringLength - marginRight;
 
-  // fpsTextLabel->buffer = fpsString;
   draw_label(app, app->fpsTextLabelId);
-  // fpsTextLabel->buffer = NULL;
 }
 
 void draw_input_mode(AppState *app) {
@@ -1715,12 +1769,7 @@ void draw_input_mode(AppState *app) {
   EntityManager *entityManager = &(app->entityManager);
 
   float marginTop = 50;
-  float marginLeft = 10;
-
-  const int bufferSize = 32;
-  char inputModeString[bufferSize];
-  // snprintf(inputModeString, bufferSize, "%s", input_mode_labels[app->inputMode]);
-  snprintf(inputModeString, bufferSize, "%s", input_mode_labels[app->inputMode]);
+  float marginLeft = 20;
 
   float windowWidth, windowHeight;
   windowWidth = oui_get_window_width(ouiContext);
@@ -1732,9 +1781,7 @@ void draw_input_mode(AppState *app) {
   inputModeTextLabel->position.x = -(float)windowWidth / 2 + marginLeft;
   inputModeTextLabel->position.y = (float)windowHeight / 2 - marginTop;
 
-  // inputModeTextLabel->buffer = inputModeString;
   draw_label(app, app->inputModeTextLabelId);
-  // inputModeTextLabel->buffer = NULL;
 }
 
 void draw_node(AppState *app, EntityId id) {
@@ -1766,11 +1813,10 @@ void draw_node(AppState *app, EntityId id) {
   rectangle.borderRadius = e->radius;
   rectangle.borderResolution = DEFAULT_BORDER_RESOLUTION;
 
-  if (id == selectedNodeId) {
-    rectangle.backgroundColor = SELECTED_NODE_COLOR;
-  } else if (id == graphInterpreter->firstChild) {
-    rectangle.backgroundColor = OUI_COLOR_RED;
-  } else {
+  /*  if (id == selectedNodeId) {
+      rectangle.backgroundColor = SELECTED_NODE_COLOR;
+    } else*/
+  {
     EntityId resourceId = NIL;
 
     if (mode == INPUT_MODE_INITIALIZE) {
@@ -1791,19 +1837,36 @@ void draw_node(AppState *app, EntityId id) {
     }
   }
 
-  float characterWidth = 30;
+  float characterWidth = 26;
   float lineHeight = 35;
   OuiText text = {0};
   snprintf(e->buffer, BUFFER_SIZE, "%d", id);
-  text.startPos.x = rectangle.centerPos.x - characterWidth / 2;
+  text.startPos.x = rectangle.centerPos.x - characterWidth * strlen(e->buffer) / 2;
   text.startPos.y = rectangle.centerPos.y - lineHeight / 2;
-  text.fontColor = OUI_COLOR_BLACK;
+  text.fontColor = (OuiColor){18.0 / 256, 18.0 / 256, 18.0 / 256, 255.0 / 256};
   text.fontSize = DEFAULT_FONT_SIZE;
   text.lineHeight = DEFAULT_LINE_HEIGHT;
-  text.maxLineWidth = 100;
+  text.maxLineWidth = 1000;
 
+  if (id == selectedNodeId) {
+    OuiRectangle outline = {0};
+    outline.borderRadius = rectangle.borderRadius + 5;
+    outline.width = 2 * outline.borderRadius;
+    outline.height = 2 * outline.borderRadius;
+    outline.backgroundColor = (OuiColor){150, 150, 150, 205};
+    outline.centerPos = rectangle.centerPos;
+    oui_draw_rectangle(ouiContext, &outline);
+  }
+  if (id == graphInterpreter->firstChild) {
+    OuiRectangle outline = {0};
+    outline.borderRadius = rectangle.borderRadius + 5;
+    outline.width = 2 * outline.borderRadius;
+    outline.height = 2 * outline.borderRadius;
+    outline.backgroundColor = OUI_COLOR_RED;
+    outline.centerPos = rectangle.centerPos;
+    oui_draw_rectangle(ouiContext, &outline);
+  }
   oui_draw_rectangle(ouiContext, &rectangle);
-
   text.content = e->buffer;
   oui_draw_text(ouiContext, &text);
   text.content = NULL;
@@ -1910,13 +1973,13 @@ void draw_brush(AppState *app) {
     return;
   }
 
-  float gap = 10;
-  float paddingLeft = 10;
-  float marginLeft = 10;
-  float marginBottom = 10;
+  float gap = 20;
+  float paddingLeft = 20;
+  float marginLeft = -20;
+  float marginBottom = -20;
   float brushRadius = 50;
   float paletteWidth = 400;
-  float paletteHeight = 100;
+  float paletteHeight = 120;
 
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
@@ -1959,9 +2022,16 @@ void draw_brush(AppState *app) {
   }
 
   if (resourceCount > 0) {
-    rectangle.width = resourceCount * (brushRadius + gap) + paddingLeft;
+    rectangle.width = (resourceCount - 0.5) * (brushRadius + gap) + paddingLeft;
     rectangle.centerPos.x = -windowWidth / 2 + marginLeft + rectangle.width / 2;
   }
+  rectangle.width += 8;
+  rectangle.height += 8;
+  rectangle.backgroundColor = ACSENT_COLOR;
+  oui_draw_rectangle(ouiContext, &rectangle);
+  rectangle.width -= 8;
+  rectangle.height -= 8;
+  rectangle.backgroundColor = brush->color;
   oui_draw_rectangle(ouiContext, &rectangle);
 
   // draw the already loaded resources
@@ -1975,7 +2045,7 @@ void draw_brush(AppState *app) {
     rectangle.width = brushRadius + 5;
     rectangle.height = brushRadius + 5;
     rectangle.centerPos.x = baseX;
-    rectangle.centerPos.y = baseY;
+    rectangle.centerPos.y = baseY + 10;
     rectangle.borderRadius = brushRadius + 5;
     rectangle.backgroundColor = OUI_COLOR_WHITE;
 
@@ -2016,14 +2086,17 @@ void draw_resource_manager(AppState *app) {
 
   float fontSize = 0.8;
 
-  float gap = 30;
+  float gap = 20;
   float paddingTopBottom = 30;
-  float paddingLeftRight = 50;
+  float paddingLeftRight = 30;
   float margin = DEFAULT_MENU_MARGIN;
 
-  float resourceGap = 30;
-  float resourceHeight = 100;
-  float resourcePaddingLeft = 10;
+  float maxLineWidth = 48;
+
+  float resourceGap = 40;
+  float resourceHeight = 80;
+  float resourcePaddingLeft = 0;
+  float resourcePaddingRight = 20;
   float resourceColorBorderRadius = 50;
 
   OuiText text = {0};
@@ -2035,6 +2108,14 @@ void draw_resource_manager(AppState *app) {
   rectangle.centerPos.x = resourceManager->position.x;
   rectangle.centerPos.y = resourceManager->position.y;
   rectangle.borderRadius = resourceManager->radius;
+  rectangle.backgroundColor = resourceManager->color;
+
+  rectangle.width += 8;
+  rectangle.height += 8;
+  rectangle.backgroundColor = ACSENT_COLOR;
+  oui_draw_rectangle(ouiContext, &rectangle);
+  rectangle.width -= 8;
+  rectangle.height -= 8;
   rectangle.backgroundColor = resourceManager->color;
   oui_draw_rectangle(ouiContext, &rectangle);
 
@@ -2050,35 +2131,53 @@ void draw_resource_manager(AppState *app) {
   while (resourceId != NIL) {
     Entity *resource = get_entity(entityManager, resourceId);
 
-    // draw the resource's background
+    // draw the add sound button
+    rectangle.width = windowWidth - 2 * margin - 2 * paddingLeftRight - resourcePaddingLeft;
     rectangle.height = resourceHeight;
-    rectangle.width = windowWidth - 2 * paddingLeftRight;
     rectangle.centerPos.x = baseX;
     rectangle.centerPos.y = baseY;
     rectangle.borderRadius = resourceManager->radius;
-    rectangle.backgroundColor = resourceManager->color;
+    rectangle.backgroundColor = ACSENT_COLOR;
+    oui_draw_rectangle(ouiContext, &rectangle);
+
+    // draw the resource's background
+    rectangle.height = resourceHeight;
+    rectangle.width = windowWidth - 2 * margin - 2 * paddingLeftRight;
+    rectangle.centerPos.x = baseX;
+    rectangle.centerPos.y = baseY;
+    rectangle.borderRadius = resourceManager->radius;
+    rectangle.backgroundColor = (OuiColor){25, 25, 25, 255};
     oui_draw_rectangle(ouiContext, &rectangle);
 
     // draw the resource's color value
     rectangle.width = resourceColorBorderRadius;
     rectangle.height = resourceColorBorderRadius;
-    rectangle.centerPos.x = -windowWidth / 2 + paddingLeftRight + resourcePaddingLeft + resourceColorBorderRadius;
+    rectangle.centerPos.x = -windowWidth / 2 + margin + paddingLeftRight + resourcePaddingLeft + resourceColorBorderRadius;
     rectangle.centerPos.y = baseY;
     rectangle.borderRadius = resourceColorBorderRadius;
     rectangle.backgroundColor = resource->color;
     oui_draw_rectangle(ouiContext, &rectangle);
 
     // draw the resource's label
-    text.startPos.x = -windowWidth / 2 + paddingLeftRight + resourcePaddingLeft + 2 * resourceColorBorderRadius + resourceGap;
+    text.startPos.x = -windowWidth / 2 + margin + paddingLeftRight + resourcePaddingLeft + resourceColorBorderRadius + resourceGap;
     text.startPos.y = baseY - 14;
     text.content = resource->buffer;
+
+    while (strlen(text.content) > maxLineWidth) {
+      text.content++;
+    }
+
     oui_draw_text(ouiContext, &text);
     text.content = NULL;
 
     float characterWidth = 25;
     text.content = "X";
-    text.startPos.x = windowWidth / 2 - margin - paddingLeftRight - resourcePaddingLeft - characterWidth;
+    text.fontSize /= 1.5;
+    text.startPos.y += 5;
+    text.startPos.x = windowWidth / 2 - margin - paddingLeftRight - resourcePaddingRight - characterWidth;
     oui_draw_text(ouiContext, &text);
+    text.fontSize *= 1.5;
+    text.startPos.y -= 5;
     text.content = NULL;
 
     baseY -= resourceHeight + gap;
@@ -2086,12 +2185,12 @@ void draw_resource_manager(AppState *app) {
   }
 
   // draw the add sound button
-  rectangle.width = windowWidth - 2 * paddingLeftRight;
+  rectangle.width = windowWidth - 2 * margin - 2 * paddingLeftRight - resourcePaddingLeft;
   rectangle.height = resourceHeight;
   rectangle.centerPos.x = 0;
   rectangle.centerPos.y = -windowHeight / 2 + margin + paddingTopBottom + resourceHeight / 2;
   rectangle.borderRadius = resourceManager->radius;
-  rectangle.backgroundColor = resourceManager->color;
+  rectangle.backgroundColor = ACSENT_COLOR;
   oui_draw_rectangle(ouiContext, &rectangle);
 
   text.content = "Add sound";

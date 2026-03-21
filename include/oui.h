@@ -79,8 +79,9 @@ int oui_has_next_frame(OuiContext *ouiContext);
 void oui_begin_frame(OuiContext *ouiContext);
 void oui_end_frame(OuiContext *ouiContext);
 
-void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle);
 void oui_draw_text(OuiContext *ouiContext, OuiText *text);
+OuiRectangle oui_get_text_hitbox(OuiContext *ouiContext, OuiText *text);
+void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle);
 
 OuiVec2i oui_get_window_size(OuiContext *ouiContext);
 int oui_get_window_width(OuiContext *ouiContext);
@@ -880,6 +881,56 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
 
   glBindVertexArray(0);
   glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+OuiRectangle oui_get_text_hitbox(OuiContext *ouiContext, OuiText *text) {
+  OuiRectangle rectangle = {0};
+
+  if (
+      ouiContext == NULL ||
+      ouiContext->numCharacters == 0 ||
+      text == NULL || text->content == NULL) {
+    return rectangle;
+  }
+
+  float lineWidth = 0;
+  float lastLineHeight = 0;
+  int x = text->startPos.x;
+  for (int i = 0; text->content[i] != '\0'; i++) {
+    unsigned char c = text->content[i];
+    if (c >= ouiContext->numCharacters) {
+      continue;
+    }
+
+    FontCharacter ch = ouiContext->fontCharacters[(unsigned int)c];
+
+    lineWidth += (ch.Advance >> 6) * text->fontSize;
+    lastLineHeight = oui_max(lastLineHeight, text->lineHeight + (ch.Size.y - ch.Bearing.y) * text->fontSize);
+
+    x += (ch.Advance >> 6) * text->fontSize;
+    float nextCharWidth = 0.0;
+
+    unsigned char c_next = text->content[c + 1];
+    if (text->content[c + 1] != '\0') {
+      FontCharacter nextChar = ouiContext->fontCharacters[(unsigned int)c_next];
+      nextCharWidth = (nextChar.Advance >> 6) * text->fontSize;
+    }
+
+    rectangle.width = oui_max(rectangle.width, lineWidth);
+    if (text->maxLineWidth > 0 && x + nextCharWidth > text->maxLineWidth) {
+      rectangle.height += text->lineHeight;
+      lineWidth = 0;
+      lastLineHeight = 0;
+
+      x = text->startPos.x;
+    }
+  }
+
+  rectangle.height += lastLineHeight;
+  rectangle.centerPos.x = text->startPos.x + rectangle.width / 2;
+  rectangle.centerPos.y = text->startPos.y - (rectangle.height) / 2 + text->lineHeight;
+
+  return rectangle;
 }
 
 //----------------------------------------
