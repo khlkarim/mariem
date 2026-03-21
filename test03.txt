@@ -1,0 +1,10 @@
+R /home/karim/dev/workspaces/personal/ctf/uv.lock
+R /home/karim/dev/workspaces/personal/ctf/uv.lock
+N 0
+N 0
+N 0
+N 0
+N 0
+N 0
+N 0
+N 0
