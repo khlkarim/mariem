@@ -15,6 +15,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,14 +54,14 @@
 #define DEFAULT_LINK_ELASTICITY 1.0
 #define DEFAULT_LINK_RESTLENGTH 300
 #define CONSTRAINT_SOLVER_ITERATIONS 2
-#define DEFAULT_NODE_MASSE 0.1 // this value is used to calculate the inv masse too
+#define DEFAULT_NODE_MASSE 0.1 // this value is used to calculate the inv masse too (=> != 0)
 // ---------------- Physics Parameters ----------------
 
 // ----------------------- Misc -----------------------
 #define MAX_ENTITIES 2050
-#define NUM_NODES 0
 #define DEFAULT_BPM 120
 #define BUFFER_SIZE 128
+#define NUM_NODES 0
 // ----------------------- Misc -----------------------
 
 // ------------------ Input Handling ------------------
@@ -71,18 +72,25 @@
 #define PRESSED GLFW_PRESS
 #define HELD GLFW_REPEAT
 
-#define KEYBINDING_PLAYING_MODE GLFW_KEY_X
-#define KEYBINDING_UNSELECT_BRUSH GLFW_KEY_ESCAPE
+#define KEYBINDING_ESCAPE GLFW_KEY_ESCAPE
+
+#define KEYBINDING_CREATE_NODE GLFW_KEY_N
+#define KEYBINDING_DELETE_SELECTED GLFW_KEY_D
+#define KEYBINDING_SAVE_PROJECT GLFW_KEY_S
+#define KEYBINDING_LOAD_PROJECT GLFW_KEY_L
+
 #define KEYBINDING_ASSERT_MODE GLFW_KEY_Q
 #define KEYBINDING_PERFORM_MODE GLFW_KEY_P
 #define KEYBINDING_INITIALIZE_MODE GLFW_KEY_I
-#define KEYBINDING_CREATE_NODE GLFW_KEY_N
-#define KEYBINDING_DELETE_SELECTED GLFW_KEY_D
-#define KEYBINDING_TOGGLE_PHYSICS GLFW_KEY_SPACE
-#define KEYBINDING_OPEN_RESOURCE_MANAGER GLFW_KEY_S
-#define KEYBINDING_SAVE_PROJECT GLFW_KEY_J
-#define KEYBINDING_LOAD_PROJECT GLFW_KEY_K
-#define KEYBINDING_TOGGLE_NEEDLE GLFW_KEY_T
+#define KEYBINDING_PLAYING_MODE GLFW_KEY_SPACE
+#define KEYBINDING_PAUSE_PLAYER GLFW_KEY_W
+
+#define KEYBINDING_TOGGLE_NEEDLE GLFW_KEY_H
+#define KEYBINDING_TOGGLE_PHYSICS GLFW_KEY_X
+#define KEYBINDING_TOGGLE_RESOURCE_MANAGER GLFW_KEY_M
+
+#define KEYBINDING_PREV_PAGE GLFW_KEY_LEFT
+#define KEYBINDING_NEXT_PAGE GLFW_KEY_RIGHT
 
 #define NUM_KEYBOARD_KEYS (GLFW_KEY_LAST + 1)
 static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
@@ -177,8 +185,12 @@ typedef struct Entity {
   char buffer[BUFFER_SIZE];
 
   float BPM;
-  float isPaused;
+  int isPaused;
+  int isInitialized;
   float hasBeenPlayingFor;
+
+  int page;
+  int limit;
 
   float gap;
   float width;
@@ -203,9 +215,12 @@ typedef struct Entity {
 typedef struct EntityManager {
   int count;
   Entity entities[MAX_ENTITIES];
+
   int initNeedles[MAX_ENTITIES];
   int prevNeedles[MAX_ENTITIES];
   int currNeedles[MAX_ENTITIES];
+  // if i is a node, initNeedles[i] = ON if i is a starting node for the graph interpreter
+  // prevNeedles and currNeedles are used to compute the next state of the graph
 
   int countNodes;
   EntityId nodeIds[MAX_ENTITIES];
@@ -215,6 +230,8 @@ typedef struct EntityManager {
   // if i is a node, row i represents a linked list of the other nodes i collides with
   // the head of the linked list is stored in the cell collisionLinkedList[i][NIL]
 
+  int currState[MAX_ENTITIES];
+  int prevState[MAX_ENTITIES];
   int initialState[MAX_ENTITIES];
   // this is the initial state of the graph
 
@@ -338,12 +355,14 @@ EntityId get_clicked_node(AppState *app);
 void link_mouse_event_handler(AppState *app);
 void node_mouse_event_handler(AppState *app);
 
-void process_audio(AppState *app);
+void process_graph(AppState *app);
+void play_beat(AppState *app);
 
 void handle_physics(AppState *app);
+void apply_forces(AppState *app);
 void detect_collisions(AppState *app);
 void resolve_collisions(AppState *app);
-void apply_forces(AppState *app);
+void flag_collision_x_axis(AppState *app, EntityId aId, EntityId bId);
 
 void draw_node(AppState *app, EntityId id);
 void draw_link(AppState *app, EntityId id);
@@ -362,17 +381,17 @@ void save_project(AppState *app);
 int main(int argc, char **argv) {
   srand(time(NULL));
 
-  /* if you want the app to live on the stack
-   * (this is not feasible if MAX_ENTITIES exceeds a certain threachold)
+  /* if you want the app to live on the stack:
+   * (this can be unfeasible if MAX_ENTITIES exceeds a certain threachold)
    *
    * AppState app = {0};
    * AppState *pApp = &app;
    * */
 
-  // if you want the app to live on the heap
-  // make sure to zero initialize the entityManager (we are using calloc here)
-  // because it uses the Entity.used field as boolean to track allocations
-  // (you can initialize it manually if you want but i am not sure wish other parts will break TODO:)
+  /* if you want the app to live on the heap
+   * make sure to zero initialize the entityManager
+   * because Entity.used is being used as boolean to track memory ownership
+   * (you can initialize it manually if you want but i am not sure wish other parts will break TODO:) */
   AppState *pApp = (AppState *)calloc(1, sizeof(AppState));
   init(pApp);
 
@@ -385,7 +404,6 @@ int main(int argc, char **argv) {
     oui_end_frame(&(pApp->ouiContext));
   }
 
-  // remove me when living on the stack
   deinit(&pApp);
 
   (void)argc;
@@ -399,8 +417,8 @@ void init(AppState *app) {
   }
 
   Clock *clock = &(app->clock);
-  ma_engine *audioEngine = &(app->audioEngine);
   OuiContext *ouiContext = &(app->ouiContext);
+  ma_engine *audioEngine = &(app->audioEngine);
   EntityManager *entityManager = &(app->entityManager);
 
   app->togglePhysics = ON;
@@ -445,8 +463,7 @@ void update(AppState *app) {
 
   handle_input(app);
   handle_physics(app);
-  process_audio(app);
-  // TODO: compute layout here for example (right before drawing)
+  process_graph(app);
 }
 
 void draw(AppState *app) {
@@ -481,6 +498,7 @@ void deinit(AppState **app) {
   oui_context_destroy(&((*app)->ouiContext));
   ma_engine_uninit(&((*app)->audioEngine));
 
+  /* remove me when living on the stack */
   free(*app);
   *app = NULL;
 }
@@ -524,6 +542,18 @@ void handle_key_bindings(AppState *app) {
   state = keyboard_key_states[KEYBINDING_DELETE_SELECTED];
   if (state == PRESSED) {
     if (app->selectedNodeId) {
+      for (int i = 1; i < entityManager->count; i++) {
+        Entity *e = get_entity(entityManager, i);
+
+        if (e->type == ENTITY_TYPE_LINK && (e->edgeA == app->selectedNodeId || e->edgeB == app->selectedNodeId)) {
+          if (i == app->selectedLinkId) {
+            app->selectedNodeId = NIL;
+          }
+
+          delete_entity(entityManager, i);
+        }
+      }
+
       delete_entity(entityManager, app->selectedNodeId);
       app->selectedNodeId = NIL;
     } else if (app->selectedLinkId) {
@@ -563,30 +593,7 @@ void handle_key_bindings(AppState *app) {
   state = keyboard_key_states[KEYBINDING_PLAYING_MODE];
   if (state == PRESSED) {
     app->inputMode = app->inputMode == INPUT_MODE_INITIALIZE ? INPUT_MODE_PLAYING : INPUT_MODE_INITIALIZE;
-
-    // initialize the current player needles
-    for (int i = 1; i < entityManager->count; i++) {
-      Entity *e = get_entity(entityManager, i);
-
-      if (e->type == ENTITY_TYPE_NODE) {
-        entityManager->currNeedles[i] = entityManager->initNeedles[i];
-        e->firstChild = get_initial_state_node(entityManager, i);
-      } else if (e->type == ENTITY_TYPE_LINK) {
-        e->state = get_initial_state_link(entityManager, i);
-      }
-    }
-
     keyboard_key_states[KEYBINDING_PLAYING_MODE] = RELEASED;
-  }
-
-  state = keyboard_key_states[KEYBINDING_TOGGLE_PHYSICS];
-  if (state == PRESSED) {
-    app->togglePhysics = app->togglePhysics == ON ? OFF : ON;
-    if (app->graphInterpreterId != NIL) {
-      Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
-      graphInterpreter->isPaused = graphInterpreter->isPaused == YES ? NO : YES;
-    }
-    keyboard_key_states[KEYBINDING_TOGGLE_PHYSICS] = RELEASED;
   }
 
   state = keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE];
@@ -597,20 +604,57 @@ void handle_key_bindings(AppState *app) {
     keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_OPEN_RESOURCE_MANAGER];
+  state = keyboard_key_states[KEYBINDING_PAUSE_PLAYER];
   if (state == PRESSED) {
-    resourceManager->isVisible = resourceManager->isVisible == YES ? NO : YES;
-    keyboard_key_states[KEYBINDING_OPEN_RESOURCE_MANAGER] = RELEASED;
+    if (app->graphInterpreterId != NIL) {
+      Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
+      graphInterpreter->isPaused = graphInterpreter->isPaused == YES ? NO : YES;
+      nob_log(NOB_INFO, "Paused");
+    }
+    keyboard_key_states[KEYBINDING_PAUSE_PLAYER] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_UNSELECT_BRUSH];
+  state = keyboard_key_states[KEYBINDING_TOGGLE_PHYSICS];
   if (state == PRESSED) {
+    app->togglePhysics = app->togglePhysics == ON ? OFF : ON;
+    keyboard_key_states[KEYBINDING_TOGGLE_PHYSICS] = RELEASED;
+  }
+
+  state = keyboard_key_states[KEYBINDING_TOGGLE_RESOURCE_MANAGER];
+  if (state == PRESSED) {
+    resourceManager->isVisible = resourceManager->isVisible == YES ? NO : YES;
+    keyboard_key_states[KEYBINDING_TOGGLE_RESOURCE_MANAGER] = RELEASED;
+  }
+
+  state = keyboard_key_states[KEYBINDING_ESCAPE];
+  if (state == PRESSED) {
+    app->selectedNodeId = NIL;
+    resourceManager->isVisible = NO;
     Entity *brush = get_entity(entityManager, app->brushId);
     brush->firstChild = NIL;
 
-    resourceManager->isVisible = NO;
+    keyboard_key_states[KEYBINDING_ESCAPE] = RELEASED;
+  }
 
-    keyboard_key_states[KEYBINDING_UNSELECT_BRUSH] = RELEASED;
+  state = keyboard_key_states[GLFW_KEY_LEFT];
+  if (state == PRESSED) {
+    resourceManager->page = oui_max(0, resourceManager->page - 1);
+    keyboard_key_states[GLFW_KEY_LEFT] = RELEASED;
+  }
+
+  state = keyboard_key_states[GLFW_KEY_RIGHT];
+  if (state == PRESSED) {
+    int resourceCount = 0;
+    EntityId resourceId = resourceManager->firstChild;
+    while (resourceId != NIL) {
+      Entity *resource = get_entity(entityManager, resourceId);
+      resourceCount++;
+      resourceId = resource->nextSibling;
+    }
+
+    int maxPages = (resourceCount / resourceManager->limit) - (resourceCount % resourceManager->limit == 0);
+    resourceManager->page = oui_min(resourceManager->page + 1, maxPages);
+    keyboard_key_states[GLFW_KEY_RIGHT] = RELEASED;
   }
 }
 
@@ -620,6 +664,218 @@ void handle_mouse_click(AppState *app) {
   bpm_mouse_event_handler(app);
   link_mouse_event_handler(app);
   node_mouse_event_handler(app);
+}
+
+void resource_manager_mouse_event_handler(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+
+  if (!resourceManager->isVisible) {
+    return;
+  }
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
+  int state;
+  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
+  // the resourceManager listens for one mouse event: click
+
+  if (state == PRESSED) {
+    float resourceHeight = 80;
+    resourceManager->position.x = windowWidth * ui_anchor_positions[resourceManager->anchor].x;
+    resourceManager->position.y = windowWidth * ui_anchor_positions[resourceManager->anchor].y;
+    resourceManager->width = windowWidth - resourceManager->marginLeft - resourceManager->marginRight;
+    resourceManager->height = windowHeight - resourceManager->marginTop - resourceManager->marginBottom;
+
+    float buttonWidth = resourceManager->width - resourceManager->paddingLeft - resourceManager->paddingRight;
+    float buttonHeight = resourceHeight;
+    NtVec2f buttonCenter = {
+        .x = resourceManager->position.x,
+        .y = resourceManager->position.y + resourceManager->height / 2 - buttonHeight / 2 - resourceManager->paddingTop,
+    };
+
+    // if the user clicked outside the resource manager
+    // close it and dont consume the click event
+    if (
+        !(mousePos.x >= -resourceManager->width / 2 &&
+          mousePos.x <= resourceManager->width / 2 &&
+          mousePos.y >= -resourceManager->height / 2 &&
+          mousePos.y <= resourceManager->height / 2)) {
+      resourceManager->isVisible = NO;
+      return;
+    }
+
+    // if he clicked the resourceManager
+    // consume the click event
+    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = RELEASED;
+
+    if (
+        mousePos.x >= buttonCenter.x - buttonWidth / 2 &&
+        mousePos.x <= buttonCenter.x + buttonWidth / 2 &&
+        mousePos.y >= buttonCenter.y - buttonHeight / 2 &&
+        mousePos.y <= buttonCenter.y + buttonHeight / 2) {
+
+      create_resource(app, NULL);
+      return;
+    }
+
+    // check if an X button was clicked
+    // and if it was, remove its corresponding resource
+    float resourceColorBorderRadius = 25;
+    float resourcePaddingLeft = 30;
+    float resourcePaddingRight = 40;
+    float characterHeight = 25;
+    float characterWidth = 25;
+    float baseX = resourceManager->position.x;
+    float baseY = buttonCenter.y - resourceManager->gap - resourceHeight;
+
+    int skipped = 0;
+    EntityId resourceId = resourceManager->firstChild;
+    while (resourceId != NIL && skipped < resourceManager->limit * resourceManager->page) {
+      Entity *resource = get_entity(entityManager, resourceId);
+      skipped++;
+      resourceId = resource->nextSibling;
+    }
+
+    int drew = 0;
+    while (resourceId != NIL && drew < resourceManager->limit) {
+      Entity *resource = get_entity(entityManager, resourceId);
+
+      // check X button
+      if (
+          mousePos.x >= baseX + buttonWidth / 2 - resourcePaddingRight - characterWidth / 2 &&
+          mousePos.x <= baseX + buttonWidth / 2 - resourcePaddingLeft + characterWidth / 2 &&
+          mousePos.y >= baseY - characterHeight / 2 &&
+          mousePos.y <= baseY + characterHeight / 2) {
+        remove_child(entityManager, app->resourceManagerId, resourceId);
+        delete_entity(entityManager, resourceId);
+        return;
+      }
+
+      // check color button
+      float distance = nwt_distance(
+          mousePos,
+          (NtVec2f){
+              baseX - buttonWidth / 2 + resourcePaddingLeft + resourceColorBorderRadius,
+              baseY,
+          });
+
+      if (distance <= resourceColorBorderRadius) {
+        nob_log(NOB_INFO, "Clicked color button");
+
+        unsigned char color[3] = {resource->color.r, resource->color.g, resource->color.b};
+        char *res = tinyfd_colorChooser("Pick a new color for the resource", NULL, color, color);
+
+        if (res != NULL) {
+          resource->color.r = color[0];
+          resource->color.g = color[1];
+          resource->color.b = color[2];
+        }
+
+        return;
+      }
+
+      if (
+          mousePos.x >= baseX - buttonWidth / 2 &&
+          mousePos.x <= baseX + buttonWidth / 2 &&
+          mousePos.y >= baseY - buttonHeight / 2 &&
+          mousePos.y <= baseY + buttonHeight / 2) {
+        nob_log(NOB_INFO, "clicked resource");
+        char *title = "Add sound";
+
+        size_t size;
+        long path_max;
+        path_max = pathconf(".", _PC_PATH_MAX);
+        if (path_max == -1)
+          size = 1024;
+        else if (path_max > 10240)
+          size = 10240;
+        else
+          size = path_max;
+
+        char *buf;
+        char *ptr;
+
+        for (buf = ptr = NULL; ptr == NULL; size *= 2) {
+          if ((buf = realloc(buf, size)) == NULL) {
+            break;
+          }
+
+          ptr = getcwd(buf, size);
+          if (ptr == NULL && errno != ERANGE) {
+            break;
+          }
+        }
+
+        if (buf != NULL) {
+          nob_log(NOB_INFO, "cwd: %s", buf);
+
+          char *fileName = tinyfd_openFileDialog(
+              title,
+              buf,
+              0,
+              NULL,
+              NULL,
+              0);
+
+          nob_log(NOB_INFO, "selected file: %s", fileName);
+          if (fileName) {
+            snprintf(resource->buffer, BUFFER_SIZE, "%s", fileName);
+          } else {
+            resource->buffer[0] = '\0';
+          }
+        }
+        return;
+      }
+
+      baseY -= resourceManager->gap + resourceHeight;
+      resourceId = resource->nextSibling;
+      drew++;
+    }
+
+    // page navigation buttons
+    float navigationButtonWidth = 80;
+    float navigationButtonHeight = 80;
+    NtVec2f navigationButtonCenter = {
+        .x = buttonCenter.x + buttonWidth / 2 - navigationButtonWidth / 2,
+        .y = -resourceManager->height / 2 + resourceManager->paddingBottom + navigationButtonHeight / 2,
+    };
+
+    if (
+        mousePos.x >= navigationButtonCenter.x - navigationButtonWidth / 2 &&
+        mousePos.x <= navigationButtonCenter.x + navigationButtonWidth / 2 &&
+        mousePos.y >= navigationButtonCenter.y - navigationButtonHeight / 2 &&
+        mousePos.y <= navigationButtonCenter.y + navigationButtonHeight / 2) {
+      int resourceCount = 0;
+      EntityId resourceId = resourceManager->firstChild;
+      while (resourceId != NIL) {
+        Entity *resource = get_entity(entityManager, resourceId);
+        resourceCount++;
+        resourceId = resource->nextSibling;
+      }
+
+      int maxPages = (resourceCount / resourceManager->limit) - (resourceCount % resourceManager->limit == 0);
+      resourceManager->page = oui_min(resourceManager->page + 1, maxPages);
+    }
+
+    navigationButtonCenter.x -= buttonWidth - navigationButtonWidth;
+
+    if (
+        mousePos.x >= navigationButtonCenter.x - navigationButtonWidth / 2 &&
+        mousePos.x <= navigationButtonCenter.x + navigationButtonWidth / 2 &&
+        mousePos.y >= navigationButtonCenter.y - navigationButtonHeight / 2 &&
+        mousePos.y <= navigationButtonCenter.y + navigationButtonHeight / 2) {
+      resourceManager->page = oui_max(0, resourceManager->page - 1);
+    }
+  }
 }
 
 void bpm_mouse_event_handler(AppState *app) {
@@ -657,6 +913,7 @@ void bpm_mouse_event_handler(AppState *app) {
         mousePos.y <= -windowHeight / 2 + textLabelHeight &&
         mousePos.y >= -windowHeight / 2 - textLabelHeight) {
       nob_log(NOB_INFO, "Clicked the BPM text label");
+
       char *newBpm = tinyfd_inputBox(
           "Pick a BPM",
           NULL,
@@ -673,162 +930,6 @@ void bpm_mouse_event_handler(AppState *app) {
       }
 
       mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = RELEASED;
-    }
-  }
-}
-
-void resource_manager_mouse_event_handler(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  OuiContext *ouiContext = &(app->ouiContext);
-  EntityManager *entityManager = &(app->entityManager);
-  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
-
-  if (!resourceManager->isVisible) {
-    return;
-  }
-
-  float windowWidth, windowHeight;
-  windowWidth = oui_get_window_width(ouiContext);
-  windowHeight = oui_get_window_height(ouiContext);
-  NtVec2f mousePos = get_mouse_position(ouiContext);
-
-  int state;
-  state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
-  // the resourceManager listens for one mouse event: click
-
-  if (state == PRESSED) {
-    // did the user click the add sound button,
-    // or did he click the remove sound button?
-
-    // Add sound button hitbox
-    float resourceHeight = 80;
-
-    resourceManager->position.x = windowWidth * ui_anchor_positions[resourceManager->anchor].x;
-    resourceManager->position.y = windowWidth * ui_anchor_positions[resourceManager->anchor].y;
-    resourceManager->width = windowWidth - resourceManager->marginLeft - resourceManager->marginRight;
-    resourceManager->height = windowHeight - resourceManager->marginTop - resourceManager->marginBottom;
-
-    float buttonWidth = resourceManager->width - resourceManager->paddingLeft - resourceManager->paddingRight;
-    float buttonHeight = resourceHeight;
-    NtVec2f buttonCenter = {
-        .x = resourceManager->position.x,
-        .y = resourceManager->position.y + resourceManager->height / 2 - buttonHeight / 2 - resourceManager->paddingTop,
-    };
-
-    /*    float margin = resourceManager->marginBottom;
-        float paddingLeftRight = resourceManager->paddingLeft;
-        float paddingTopBottom = resourceManager->paddingTop;
-        float resourceManagerWidth = windowWidth - 2 * margin;
-        float resourceManagerHeight = windowHeight - 2 * margin;
-
-        float resourceGap = 30;
-        float resourceHeight = 100;
-        float resourcePaddingRight = 10;*/
-
-    // if the user clicked outside the resource manager
-    // close it and dont consume the click event
-    if (
-        !(mousePos.x >= -resourceManager->width / 2 &&
-          mousePos.x <= resourceManager->width / 2 &&
-          mousePos.y >= -resourceManager->height / 2 &&
-          mousePos.y <= resourceManager->height / 2)) {
-      resourceManager->isVisible = NO;
-      return;
-    }
-
-    // if he clicked the resourceManager
-    // consume the click event
-    mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = RELEASED;
-
-    // check if the user clicked the add sound button
-    /*    float buttonHeight = 100;
-        float buttonWidth = windowWidth - 2 * margin - 2 * paddingLeftRight;
-
-        NtVec2f buttonCenter = {
-            .x = 0,
-            .y = -windowHeight / 2 + margin + paddingTopBottom + buttonHeight / 2,
-        };
-    */
-    if (
-        mousePos.x >= buttonCenter.x - buttonWidth / 2 &&
-        mousePos.x <= buttonCenter.x + buttonWidth / 2 &&
-        mousePos.y >= buttonCenter.y - buttonHeight / 2 &&
-        mousePos.y <= buttonCenter.y + buttonHeight / 2) {
-
-      // TODO: get the file from a different thread
-      char *title = "Add sound";
-
-      size_t size;
-      long path_max;
-      path_max = pathconf(".", _PC_PATH_MAX);
-      if (path_max == -1)
-        size = 1024;
-      else if (path_max > 10240)
-        size = 10240;
-      else
-        size = path_max;
-
-      char *buf;
-      char *ptr;
-
-      for (buf = ptr = NULL; ptr == NULL; size *= 2) {
-        if ((buf = realloc(buf, size)) == NULL) {
-          break;
-        }
-
-        ptr = getcwd(buf, size);
-        if (ptr == NULL && errno != ERANGE) {
-          break;
-        }
-      }
-
-      if (buf != NULL) {
-        nob_log(NOB_INFO, "cwd: %s", buf);
-
-        char *fileName = tinyfd_openFileDialog(
-            title,
-            buf,
-            0,
-            NULL,
-            NULL,
-            0);
-
-        nob_log(NOB_INFO, "selected file: %s", fileName);
-        if (fileName) {
-          create_resource(app, fileName);
-        }
-      }
-
-      return;
-    }
-
-    // check if an X button was clicked
-    // and if it was remove its corresponding resource
-    EntityId resourceId = resourceManager->firstChild;
-
-    float resourcePaddingRight = 40;
-    float characterHeight = 25;
-    float characterWidth = 25;
-    float baseX = resourceManager->position.x + buttonWidth / 2 - resourcePaddingRight;
-    float baseY = buttonCenter.y - resourceManager->gap - resourceHeight;
-
-    while (resourceId != NIL) {
-      Entity *resource = get_entity(entityManager, resourceId);
-
-      if (
-          mousePos.x >= baseX &&
-          mousePos.x <= baseX + characterWidth &&
-          mousePos.y >= baseY - characterHeight / 2 &&
-          mousePos.y <= baseY + characterHeight / 2) {
-        remove_child(entityManager, app->resourceManagerId, resourceId);
-        return;
-      }
-
-      baseY -= resourceManager->gap + resourceHeight;
-      resourceId = resource->nextSibling;
     }
   }
 }
@@ -862,19 +963,30 @@ EntityId get_clicked_link(AppState *app) {
       Entity *a = get_entity(entityManager, e->edgeA);
       Entity *b = get_entity(entityManager, e->edgeB);
 
+      int gap = 10;
+      int hasAnEvilTwin = 0;
+      for (int j = 0; j < entityManager->count; j++) {
+        Entity *other = get_entity(entityManager, j);
+
+        if (other->type == ENTITY_TYPE_LINK && e->edgeA == other->edgeB && e->edgeB == other->edgeA) {
+          hasAnEvilTwin = 1;
+        }
+      }
+
       NtVec2f diff = nwt_sub(a->position, b->position);
       float distance = nwt_length(diff);
       NtVec2f normalizedDiff = nwt_normalize(diff);
-
-      NtVec2f bOffset = nwt_add(b->position, nwt_mult_s(normalizedDiff, b->radius));
-      float linkLength = distance - a->radius - b->radius;
-
-      NtVec2f mid = nwt_add(bOffset, nwt_mult_s(normalizedDiff, linkLength / 2));
 
       NtVec2f orthogonal = {
           .x = -normalizedDiff.y,
           .y = normalizedDiff.x};
       nwt_normalize(orthogonal);
+
+      NtVec2f bOffset = nwt_add(b->position, nwt_mult_s(normalizedDiff, b->radius));
+      float linkLength = distance - a->radius - b->radius;
+
+      NtVec2f mid = nwt_add(bOffset, nwt_mult_s(normalizedDiff, linkLength / 2));
+      mid = nwt_add(mid, nwt_mult_s(orthogonal, gap * hasAnEvilTwin));
 
       // we transform to a different frame of reference
       // and we project on it
@@ -1031,7 +1143,6 @@ void node_mouse_event_handler(AppState *app) {
     return;
   }
 
-  float dt = app->clock.dt;
   OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
   NtVec2f mousePos = get_mouse_position(ouiContext);
@@ -1044,17 +1155,6 @@ void node_mouse_event_handler(AppState *app) {
   // if there is an active drag event
   // the selected nodes will be affected by it
   if (state == HELD) {
-    /* Entity *e = get_entity(entityManager, app->selectedNodeId);
-     float dragSpeed = 10 * dt * 1000;
-
-     NtVec2f dir = nwt_sub(mousePos, e->position);
-     float dirLength = nwt_length(dir);
-
-     if (dirLength > 0) {
-       dir = nwt_div_s(dir, dirLength);
-       e->force = nwt_add(e->force, nwt_mult_s(dir, dragSpeed));
-     }*/
-
     if (app->selectedNodeId != NIL) {
       NtVec2f mousePos = get_mouse_position(&app->ouiContext);
       Entity *selectedNode = get_entity(entityManager, app->selectedNodeId);
@@ -1069,14 +1169,11 @@ void node_mouse_event_handler(AppState *app) {
         float posError = (deltaLength - restLength) * 0.5;
 
         NtVec2f springForceA = nwt_mult_s(delta, -elasticity * posError / deltaLength);
-        //      NtVec2f springForceB = nwt_mult_s(delta, elasticity * posError / deltaLength);
-
         selectedNode->force = nwt_add(selectedNode->force, springForceA);
 
         // damping force : https://phys.libretexts.org/Courses/University_of_California_Davis/UCD%3A_Physics_9HA__Classical_Mechanics/8%3A_Small_Oscillations/8.3%3A_Damping_and_Resonance
         float damp = 0.5;
         selectedNode->force = nwt_add(selectedNode->force, nwt_mult_s(selectedNode->velocity, -damp));
-        //      b->force = nwt_add(b->force, nwt_mult_s(b->velocity, -damp));
       }
     }
   }
@@ -1187,12 +1284,14 @@ void brush_mouse_event_handler(AppState *app) {
     }
 
     if (resourceCount > 0) {
+      int resourcesInCurrentPage = oui_min(resourceCount - brush->page * brush->limit, brush->limit);
+
       NtVec2f brushCenter = {
           .x = windowWidth * ui_anchor_positions[brush->anchor].x + brush->marginLeft - brush->marginRight,
           .y = windowHeight * ui_anchor_positions[brush->anchor].y + brush->marginBottom - brush->marginTop,
       };
 
-      float brushWidth = 2 * resourceCount * brush->radius + (resourceCount - 1) * brush->gap + brush->paddingLeft + brush->paddingRight;
+      float brushWidth = 2 * resourcesInCurrentPage * brush->radius + (resourcesInCurrentPage - 1) * brush->gap + brush->paddingLeft + brush->paddingRight;
       brushCenter.x += brushWidth / 2;
       brushCenter.y += brush->height / 2;
 
@@ -1208,11 +1307,20 @@ void brush_mouse_event_handler(AppState *app) {
 
         // and check if the current resource needs to change
         EntityId resourceId = resourceManager->firstChild;
-        float stepX = (brushWidth - brush->paddingLeft - brush->paddingRight) / resourceCount;
-        float baseX = brushCenter.x - stepX * resourceCount / 2;
+        float stepX = (brushWidth - brush->paddingLeft - brush->paddingRight) / resourcesInCurrentPage;
+        float baseX = brushCenter.x - stepX * resourcesInCurrentPage / 2;
         float baseY = brushCenter.y;
 
-        while (resourceId != NIL) {
+        int skipped = 0;
+        resourceId = resourceManager->firstChild;
+        while (resourceId != NIL && skipped < brush->limit * brush->page) {
+          Entity *resource = get_entity(entityManager, resourceId);
+          skipped++;
+          resourceId = resource->nextSibling;
+        }
+
+        int drew = 0;
+        while (resourceId != NIL && drew < brush->limit) {
           Entity *resource = get_entity(entityManager, resourceId);
 
           if (nwt_distance(mousePos, (NtVec2f){baseX + stepX / 2, baseY}) <= brush->radius) {
@@ -1220,53 +1328,54 @@ void brush_mouse_event_handler(AppState *app) {
             nob_log(NOB_INFO, "Changed brush resource to %d", resourceId);
           }
 
+          drew++;
           baseX += stepX;
           resourceId = resource->nextSibling;
+        }
+
+        // page navigation buttons
+        float navigationButtonWidth = 50;
+        float navigationButtonHeight = 50;
+        NtVec2f navigationButtonCenter = {
+            .x = brushCenter.x + brushWidth / 2 - navigationButtonWidth / 2,
+            .y = brushCenter.y,
+        };
+
+        if (
+            mousePos.x >= navigationButtonCenter.x - navigationButtonWidth / 2 &&
+            mousePos.x <= navigationButtonCenter.x + navigationButtonWidth / 2 &&
+            mousePos.y >= navigationButtonCenter.y - navigationButtonHeight / 2 &&
+            mousePos.y <= navigationButtonCenter.y + navigationButtonHeight / 2) {
+          int resourceCount = 0;
+          EntityId resourceId = resourceManager->firstChild;
+          while (resourceId != NIL) {
+            Entity *resource = get_entity(entityManager, resourceId);
+            resourceCount++;
+            resourceId = resource->nextSibling;
+          }
+
+          int maxPages = (resourceCount / brush->limit) - (resourceCount % brush->limit == 0);
+          brush->page = oui_min(brush->page + 1, maxPages);
+        }
+
+        navigationButtonCenter.x -= brushWidth - navigationButtonWidth;
+
+        if (
+            mousePos.x >= navigationButtonCenter.x - navigationButtonWidth / 2 &&
+            mousePos.x <= navigationButtonCenter.x + navigationButtonWidth / 2 &&
+            mousePos.y >= navigationButtonCenter.y - navigationButtonHeight / 2 &&
+            mousePos.y <= navigationButtonCenter.y + navigationButtonHeight / 2) {
+          brush->page = oui_max(0, brush->page - 1);
         }
       }
     }
   }
 }
 
-void dump_physics_state(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  /*EntityManager *entityManager = &(app->entityManager);
-
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
-
-    if (e->type == ENTITY_TYPE_NODE) {
-      nob_log(NOB_INFO, "NODE::%d::POSITION::{%f,%f}", i, e->position.x, e->position.y);
-      nob_log(NOB_INFO, "NODE::%d::VELOCITY::{%f,%f}", i, e->velocity.x, e->velocity.y);
-      nob_log(NOB_INFO, "NODE::%d::FORCE::{%f,%f}", i, e->force.x, e->force.y);
-    }
-  }*/
-}
-
 void handle_physics(AppState *app) {
   detect_collisions(app);
   resolve_collisions(app);
-  dump_physics_state(app);
   apply_forces(app);
-}
-
-void flag_collision_x_axis(AppState *app, EntityId aId, EntityId bId) {
-  if (app == NULL) {
-    return;
-  }
-
-  EntityManager *entityManager = &(app->entityManager);
-
-  // add bId to the linked list on aId's row
-  entityManager->collisionLinkedList[aId * MAX_ENTITIES + bId] = entityManager->collisionLinkedList[aId * MAX_ENTITIES];
-  entityManager->collisionLinkedList[aId * MAX_ENTITIES] = bId;
-
-  // add aId to the linked list on bId's row
-  entityManager->collisionLinkedList[bId * MAX_ENTITIES + aId] = entityManager->collisionLinkedList[bId * MAX_ENTITIES];
-  entityManager->collisionLinkedList[bId * MAX_ENTITIES] = aId;
 }
 
 void detect_collisions(AppState *app) {
@@ -1291,7 +1400,6 @@ void detect_collisions(AppState *app) {
   heap_sort(entityManager, SORT_AXIS_X);
 
   // broad phase
-  // TODO: sliding window: if a is behind you and you intersect with it, then you intersect will all the elements between you and a
   for (int i = 0; i < entityManager->countNodes - 1; i++) {
     for (int j = i + 1; j < entityManager->countNodes; j++) {
       EntityId aId = entityManager->nodeIds[i];
@@ -1507,6 +1615,22 @@ void apply_forces(AppState *app) {
   }
 }
 
+void flag_collision_x_axis(AppState *app, EntityId aId, EntityId bId) {
+  if (app == NULL) {
+    return;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  // add bId to the linked list on aId's row
+  entityManager->collisionLinkedList[aId * MAX_ENTITIES + bId] = entityManager->collisionLinkedList[aId * MAX_ENTITIES];
+  entityManager->collisionLinkedList[aId * MAX_ENTITIES] = bId;
+
+  // add aId to the linked list on bId's row
+  entityManager->collisionLinkedList[bId * MAX_ENTITIES + aId] = entityManager->collisionLinkedList[bId * MAX_ENTITIES];
+  entityManager->collisionLinkedList[bId * MAX_ENTITIES] = aId;
+}
+
 void heap_push(EntityManager *entityManager, int val, SortAxis sortAxis) {
   if (entityManager->countNodes >= MAX_ENTITIES) {
     nob_log(NOB_WARNING, "Can't push into heap, capacity exceeded, count: %d\n", entityManager->count);
@@ -1518,7 +1642,6 @@ void heap_push(EntityManager *entityManager, int val, SortAxis sortAxis) {
 
   // insert the value at the end of the heap
   entityManager->nodeIds[curr] = val;
-  // nob_log(NOB_INFO, "Pushing: %d", val);
 
   if (sortAxis == SORT_AXIS_X) {
     while (
@@ -1647,113 +1770,124 @@ void my_swap(int *a, int *b) {
   *a = temp;
 }
 
-void process_audio(AppState *app) {
+void process_graph(AppState *app) {
   if (
       app == NULL ||
-      app->graphInterpreterId == NIL) {
+      app->graphInterpreterId == NIL ||
+      app->audioEngineInitStatus != MA_SUCCESS) {
     return;
   }
 
   float dt = app->clock.dt;
-  ma_engine *audioEngine = &(app->audioEngine);
   EntityManager *entityManager = &(app->entityManager);
   Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
 
-  if (graphInterpreter->isPaused)
+  if (app->inputMode != INPUT_MODE_PLAYING) {
+    graphInterpreter->isInitialized = NO;
+    graphInterpreter->hasBeenPlayingFor = 0;
     return;
+  }
+
+  if (graphInterpreter->isPaused) {
+    return;
+  }
+
+  if (graphInterpreter->isInitialized == NO) {
+    for (int i = 1; i < entityManager->count; i++) {
+      entityManager->currState[i] = entityManager->initialState[i];
+      entityManager->currNeedles[i] = entityManager->initNeedles[i];
+    }
+
+    graphInterpreter->isInitialized = YES;
+    play_beat(app);
+    return;
+  }
 
   if (app->inputMode == INPUT_MODE_PLAYING) {
-    // on each frame
-    // accumulate time and if it reachs the BPM
+    // accumulate time and if it reachs the BPM duration
     // check if you can perform a transition
-    // the node that is currently playing is the firstChild of the graph interpreter
     float beatDuration = 1 / (graphInterpreter->BPM / 60);
     graphInterpreter->hasBeenPlayingFor += dt;
 
     if (graphInterpreter->hasBeenPlayingFor >= beatDuration) {
-      // iterate over all the link that bind to this node
+      // iterate over all the link that connected to this node
       // compare their asserts to the current state of the graph
-      // if the assert of a transition is valid, check the perform statement it imposes
-      // execute them and then transition to the other end if the link (the graph is directed)
+      // if the assert of a transition is valid, execute its perform statements
+
       for (int i = 1; i < entityManager->count; i++) {
+        entityManager->prevState[i] = entityManager->currState[i];
         entityManager->prevNeedles[i] = entityManager->currNeedles[i];
       }
 
-      for (int p = 1; p < entityManager->count; p++) {
-        if (entityManager->prevNeedles[p] == YES) {
-          EntityId currentNode = p;
+      for (int i = 1; i < entityManager->count; i++) {
+        Entity *curr = get_entity(entityManager, i);
+
+        if (curr->type == ENTITY_TYPE_NODE && entityManager->prevNeedles[i] == YES) {
+          EntityId currentNode = i;
           nob_log(NOB_INFO, "Current node: %d", currentNode);
 
           nob_log(NOB_INFO, "Interating over the links:");
-          for (int i = 1; i < entityManager->count; i++) {
-            Entity *link = get_entity(entityManager, i);
+          for (int j = 1; j < entityManager->count; j++) {
+            Entity *link = get_entity(entityManager, j);
 
-            if (
-                link->type == ENTITY_TYPE_LINK &&
-                link->edgeA == currentNode && currentNode != NIL) {
-              nob_log(NOB_INFO, " Found a link connected to the currentNode: %d", i);
+            if (link->type == ENTITY_TYPE_LINK && link->edgeA == currentNode) {
+              nob_log(NOB_INFO, " Found a link connected to the currentNode %d: %d", i, j);
 
               // check if the assert is true
               int assertIsValid = YES;
               nob_log(NOB_INFO, " Checking if its assert is valid");
 
-              for (int j = 1; j < entityManager->count; j++) {
-                if (i == j) {
-                  continue;
-                }
-
-                Entity *e = get_entity(entityManager, j);
+              for (int k = 1; k < entityManager->count; k++) {
+                Entity *e = get_entity(entityManager, k);
 
                 if (e->type == ENTITY_TYPE_NODE) {
-                  EntityId assertedResourceId = get_assert_link_node(entityManager, i, j);
+                  EntityId assertedResourceId = get_assert_link_node(entityManager, j, k);
 
                   if (
                       assertedResourceId != NIL &&
-                      e->firstChild != assertedResourceId) {
-                    nob_log(NOB_INFO, "   Assert is not valid because of node %d", j);
+                      entityManager->prevState[k] != assertedResourceId) {
+                    nob_log(NOB_INFO, "   Assert is not valid because of node %d", k);
                     assertIsValid = NO;
                   }
                 } else if (e->type == ENTITY_TYPE_LINK) {
-                  LinkState assertedLinkState = get_assert_link_link(entityManager, i, j);
+                  LinkState assertedLinkState = get_assert_link_link(entityManager, j, k);
 
                   if (
                       assertedLinkState != LINK_STATE_NONE &&
-                      e->state != assertedLinkState) {
-                    nob_log(NOB_INFO, "   Assert is not valid because of link %d", j);
+                      entityManager->prevState[k] != (int)assertedLinkState) {
+                    nob_log(NOB_INFO, "   Assert is not valid because of link %d", k);
                     assertIsValid = NO;
                   }
                 }
               }
 
               if (assertIsValid) {
-                nob_log(NOB_INFO, " Transitioning from %d to %d using the %d", link->edgeA, link->edgeB, i);
+                nob_log(NOB_INFO, " Transitioning from %d to %d using the %d", link->edgeA, link->edgeB, j);
 
-                for (int j = 1; j < entityManager->count; j++) {
-                  Entity *e = get_entity(entityManager, j);
+                for (int k = 1; k < entityManager->count; k++) {
+                  Entity *e = get_entity(entityManager, k);
 
                   if (e->type == ENTITY_TYPE_NODE) {
-                    EntityId performedResourceId = get_perform_link_node(entityManager, i, j);
+                    EntityId performedResourceId = get_perform_link_node(entityManager, j, k);
 
                     if (performedResourceId != NIL) {
-                      e->firstChild = performedResourceId;
+                      entityManager->currState[k] = performedResourceId;
                     }
                   } else if (e->type == ENTITY_TYPE_LINK) {
-                    LinkState performedLinkState = get_perform_link_link(entityManager, i, j);
+                    LinkState performedLinkState = get_perform_link_link(entityManager, j, k);
 
                     if (performedLinkState != LINK_STATE_NONE) {
-                      e->state = performedLinkState;
+                      entityManager->currState[k] = performedLinkState;
                     }
                   }
                 }
 
-                //  graphInterpreter->firstChild = link->edgeB;
                 entityManager->currNeedles[link->edgeA] -= 1;
                 entityManager->currNeedles[link->edgeB] += 1;
               }
             }
           }
 
-          ma_engine_play_sound(audioEngine, "wav/a1.wav", NULL);
           graphInterpreter->hasBeenPlayingFor = 0;
         }
       }
@@ -1761,6 +1895,38 @@ void process_audio(AppState *app) {
       for (int i = 1; i < entityManager->count; i++) {
         entityManager->currNeedles[i] = oui_max(NO, oui_min(entityManager->currNeedles[i], YES));
       }
+
+      play_beat(app);
+    }
+  }
+}
+
+void play_beat(AppState *app) {
+  if (app == NULL ||
+      app->graphInterpreterId == NIL ||
+      app->inputMode != INPUT_MODE_PLAYING ||
+      app->audioEngineInitStatus != MA_SUCCESS) {
+    return;
+  }
+
+  ma_engine *audioEngine = &(app->audioEngine);
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
+
+  if (graphInterpreter->isPaused == YES) {
+    return;
+  }
+
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (
+        e->type == ENTITY_TYPE_NODE &&
+        entityManager->currState[i] != NIL &&
+        entityManager->currNeedles[i] == YES) {
+      Entity *resource = get_entity(entityManager, entityManager->currState[i]);
+      nob_log(NOB_INFO, "Playing: %s", resource->buffer);
+      ma_engine_play_sound(audioEngine, resource->buffer, NULL);
     }
   }
 }
@@ -1813,11 +1979,12 @@ void create_entities(AppState *app) {
   brush->height = 100;
   brush->marginLeft = 10;
   brush->marginBottom = 10;
-  brush->paddingLeft = 20;
-  brush->paddingRight = 20;
+  brush->paddingLeft = 30;
+  brush->paddingRight = 30;
   brush->isVisible = 1;
   brush->radius = 25;
   brush->color = OUI_COLOR_BLACK;
+  brush->limit = 5;
 
   app->resourceManagerId = create_entity(entityManager);
   Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
@@ -1831,9 +1998,10 @@ void create_entities(AppState *app) {
   resourceManager->paddingTop = 30;
   resourceManager->paddingLeft = 50;
   resourceManager->paddingRight = 50;
-  resourceManager->paddingBottom = 30;
+  resourceManager->paddingBottom = 15;
   resourceManager->radius = 10;
   resourceManager->color = OUI_COLOR_BLACK;
+  resourceManager->limit = 9;
 
   int numNodes = NUM_NODES;
   float masse = DEFAULT_NODE_MASSE;
@@ -1885,6 +2053,17 @@ EntityId create_link(AppState *app, EntityId a, EntityId b) {
   }
 
   EntityManager *entityManager = &(app->entityManager);
+  int existsA = 1 <= a && a < entityManager->count, existsB = 1 <= b && b < entityManager->count;
+
+  if (!existsA) {
+    nob_log(NOB_INFO, "You are trying to create a link with an non-existing edge: aId: %d", a);
+    return NIL;
+  }
+
+  if (!existsB) {
+    nob_log(NOB_INFO, "You are trying to create a link with an non-existing edge: bId: %d", b);
+    return NIL;
+  }
 
   for (int i = 1; i < entityManager->count; i++) {
     Entity *e = get_entity(entityManager, i);
@@ -1921,8 +2100,9 @@ EntityId create_resource(AppState *app, char *fileName) {
   Entity *resource = get_entity(entityManager, resourceId);
 
   resource->type = ENTITY_TYPE_RESOURCE;
-  snprintf(resource->buffer, BUFFER_SIZE, "%s", fileName);
-  // resource->buffer = fileName; // TODO: use after free?
+  if (fileName != NULL) {
+    snprintf(resource->buffer, BUFFER_SIZE, "%s", fileName);
+  }
   resource->color = (OuiColor){
       .r = rand() % 256,
       .g = rand() % 256,
@@ -2086,7 +2266,7 @@ void draw_node(AppState *app, EntityId id) {
   } else if (mode == INPUT_MODE_PERFORM) {
     resourceId = get_perform_link_node(entityManager, selectedLinkId, id);
   } else if (mode == INPUT_MODE_PLAYING) {
-    resourceId = e->firstChild;
+    resourceId = entityManager->currState[id];
   }
 
   if (resourceId == NIL) {
@@ -2156,9 +2336,26 @@ void draw_link(AppState *app, EntityId id) {
   float cos = nwt_dot(normalizedDiff, NT_X);
   float sin = nwt_dot(normalizedDiff, NT_Y);
 
+  // the direction orthogonal to the current link direction
+  // (normalizedDiff rotated by 90 degrees)
+  NtVec2f orthogonal = {
+      .x = -normalizedDiff.y,
+      .y = normalizedDiff.x};
+  nwt_normalize(orthogonal);
+
+  int gap = 10;
+  int hasAnEvilTwin = 0;
+  for (int i = 0; i < entityManager->count; i++) {
+    Entity *other = get_entity(entityManager, i);
+
+    if (other->type == ENTITY_TYPE_LINK && e->edgeA == other->edgeB && e->edgeB == other->edgeA) {
+      hasAnEvilTwin = 1;
+    }
+  }
+
   OuiRectangle rectangle = {0};
 
-  rectangle.width = linkLength;
+  rectangle.width = linkLength + 5 * hasAnEvilTwin;
   rectangle.height = DEFAULT_LINK_THICKNESS;
 
   if (sin > 0) {
@@ -2168,55 +2365,48 @@ void draw_link(AppState *app, EntityId id) {
   }
 
   rectangle.centerPos = (OuiVec2f){
-      .x = mid.x,
-      .y = mid.y,
+      .x = mid.x + hasAnEvilTwin * gap * orthogonal.x,
+      .y = mid.y + hasAnEvilTwin * gap * orthogonal.y,
   };
 
   rectangle.borderRadius = 0;
   rectangle.borderRadius = arrowBorderRadius;
   rectangle.borderResolution = 0;
 
-  if (id == selectedLinkId) {
-    rectangle.backgroundColor = SELECTED_NODE_COLOR;
-  } else {
-    LinkState state = LINK_STATE_NONE;
+  LinkState state = LINK_STATE_NONE;
 
-    if (mode == INPUT_MODE_INITIALIZE) {
-      state = get_initial_state_node(entityManager, id);
-    } else if (mode == INPUT_MODE_ASSERT) {
-      state = get_assert_link_link(entityManager, selectedLinkId, id);
-    } else if (mode == INPUT_MODE_PERFORM) {
-      state = get_perform_link_link(entityManager, selectedLinkId, id);
-    } else if (mode == INPUT_MODE_PLAYING) {
-      state = e->state;
-    }
-
-    rectangle.backgroundColor = link_state_colors[state];
+  if (mode == INPUT_MODE_INITIALIZE) {
+    state = get_initial_state_node(entityManager, id);
+  } else if (mode == INPUT_MODE_ASSERT) {
+    state = get_assert_link_link(entityManager, selectedLinkId, id);
+  } else if (mode == INPUT_MODE_PERFORM) {
+    state = get_perform_link_link(entityManager, selectedLinkId, id);
+  } else if (mode == INPUT_MODE_PLAYING) {
+    state = entityManager->currState[id];
   }
+
+  rectangle.backgroundColor = link_state_colors[state];
+  if (id == selectedLinkId && state == LINK_STATE_NONE) {
+    rectangle.backgroundColor = SELECTED_NODE_COLOR;
+  }
+
   oui_draw_rectangle(ouiContext, &rectangle);
 
   // Draw the arrow
   rectangle.width = arrowSize;
   rectangle.height = DEFAULT_LINK_THICKNESS;
-  // rectangle.borderRadius = arrowBorderRadius;
-
-  // the direction orthogonal to the current link direction (normalizedDiff rotated by 90 degrees)
-  NtVec2f orthogonal = {
-      .x = -normalizedDiff.y,
-      .y = normalizedDiff.x};
-  nwt_normalize(orthogonal);
 
   // rotation relative to the current link direction
   rectangle.rotationXY += -NT_PI / 4;
 
-  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.x;
-  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.y;
+  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
+  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
   oui_draw_rectangle(ouiContext, &rectangle);
 
   // rotation relative to the current link direction
   rectangle.rotationXY += NT_PI / 2;
-  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.x;
-  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.y;
+  rectangle.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
+  rectangle.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
   oui_draw_rectangle(ouiContext, &rectangle);
   // Draw the arrow
 }
@@ -2265,7 +2455,8 @@ void draw_brush(AppState *app) {
   rectangle.centerPos.x = windowWidth * ui_anchor_positions[brush->anchor].x + brush->marginLeft - brush->marginRight;
   rectangle.centerPos.y = windowHeight * ui_anchor_positions[brush->anchor].y + brush->marginBottom - brush->marginTop;
 
-  rectangle.width = 2 * resourceCount * brush->radius + (resourceCount - 1) * brush->gap + brush->paddingLeft + brush->paddingRight;
+  int resourcesInCurrentPage = oui_min(resourceCount - brush->page * brush->limit, brush->limit);
+  rectangle.width = 2 * resourcesInCurrentPage * brush->radius + (resourcesInCurrentPage - 1) * brush->gap + brush->paddingLeft + brush->paddingRight;
   rectangle.centerPos.x += rectangle.width / 2;
   rectangle.centerPos.y += rectangle.height / 2;
 
@@ -2279,15 +2470,25 @@ void draw_brush(AppState *app) {
   rectangle.backgroundColor = brush->color;
   // outline
 
+  float brushWidth = rectangle.width;
+  float brushCenterX = rectangle.centerPos.x;
   oui_draw_rectangle(ouiContext, &rectangle);
 
   // draw the loaded resources
-  resourceId = resourceManager->firstChild;
-  float stepX = (rectangle.width - brush->paddingLeft - brush->paddingRight) / resourceCount;
-  float baseX = rectangle.centerPos.x - stepX * resourceCount / 2;
+  float stepX = (rectangle.width - brush->paddingLeft - brush->paddingRight) / resourcesInCurrentPage;
+  float baseX = rectangle.centerPos.x - stepX * resourcesInCurrentPage / 2;
   float baseY = rectangle.centerPos.y;
 
-  while (resourceId != NIL) {
+  int skipped = 0;
+  resourceId = resourceManager->firstChild;
+  while (resourceId != NIL && skipped < brush->limit * brush->page) {
+    Entity *resource = get_entity(entityManager, resourceId);
+    skipped++;
+    resourceId = resource->nextSibling;
+  }
+
+  int drew = 0;
+  while (resourceId != NIL && drew < brush->limit) {
     Entity *resource = get_entity(entityManager, resourceId);
 
     rectangle.centerPos.x = baseX + stepX / 2;
@@ -2312,6 +2513,26 @@ void draw_brush(AppState *app) {
 
     baseX += stepX;
     resourceId = resource->nextSibling;
+    drew++;
+  }
+
+  int hasPrevPage = brush->page > 0;
+  int hasNextPage = resourceCount > brush->limit * (brush->page + 1);
+
+  OuiText pageNavigationLabel = {0};
+  pageNavigationLabel.content = ">";
+  pageNavigationLabel.fontSize = 0.7;
+  pageNavigationLabel.fontColor = ACSENT_COLOR;
+  pageNavigationLabel.startPos.x = brushCenterX + brushWidth / 2 - brush->paddingRight;
+  pageNavigationLabel.startPos.y = baseY - 10;
+  if (hasNextPage) {
+    oui_draw_text(ouiContext, &pageNavigationLabel);
+  }
+
+  pageNavigationLabel.content = "<";
+  pageNavigationLabel.startPos.x = brushCenterX - brushWidth / 2 + brush->paddingLeft - 20;
+  if (hasPrevPage) {
+    oui_draw_text(ouiContext, &pageNavigationLabel);
   }
 }
 
@@ -2377,19 +2598,26 @@ void draw_resource_manager(AppState *app) {
   text.fontSize = fontSize;
   text.fontColor = OUI_COLOR_WHITE;
   text.lineHeight = DEFAULT_LINE_HEIGHT;
-  text.content = "Add sound";
+  text.content = "Add color";
   text.startPos.x = button.centerPos.x - (float)DEFAULT_CHARACTER_WIDTH * strlen(text.content) / 2;
   text.startPos.y = button.centerPos.y - (float)DEFAULT_LINE_HEIGHT / 3.5;
   oui_draw_text(ouiContext, &text);
   text.content = NULL;
 
   // draw the already loaded resources
-  EntityId resourceId = resourceManager->firstChild;
-
   float baseX = resourceManager->position.x;
   float baseY = button.centerPos.y - resourceManager->gap - resourceHeight;
 
-  while (resourceId != NIL) {
+  int skipped = 0;
+  EntityId resourceId = resourceManager->firstChild;
+  while (resourceId != NIL && skipped < resourceManager->limit * resourceManager->page) {
+    Entity *resource = get_entity(entityManager, resourceId);
+    skipped++;
+    resourceId = resource->nextSibling;
+  }
+
+  int drew = 0;
+  while (resourceId != NIL && drew < resourceManager->limit) {
     Entity *resource = get_entity(entityManager, resourceId);
 
     // draw the resource's background
@@ -2433,6 +2661,45 @@ void draw_resource_manager(AppState *app) {
 
     baseY -= resourceManager->gap + resourceHeight;
     resourceId = resource->nextSibling;
+    drew++;
+  }
+
+  int resourceCount = 0;
+  resourceId = resourceManager->firstChild;
+  while (resourceId != NIL) {
+    Entity *resource = get_entity(entityManager, resourceId);
+    resourceCount++;
+    resourceId = resource->nextSibling;
+  }
+
+  int hasPrevPage = resourceManager->page > 0;
+  int hasNextPage = resourceCount > resourceManager->limit * (resourceManager->page + 1);
+
+  OuiText pageNavigationLabel = {0};
+  pageNavigationLabel.fontColor = ACSENT_COLOR;
+  pageNavigationLabel.fontSize = DEFAULT_FONT_SIZE;
+
+  OuiRectangle pageNavigation = {0};
+  pageNavigation.width = 80;
+  pageNavigation.height = 80;
+  pageNavigation.borderRadius = 15;
+  pageNavigation.centerPos.x = rectangle.centerPos.x;
+  pageNavigation.centerPos.y = rectangle.centerPos.y - rectangle.height / 2 + resourceManager->paddingBottom + pageNavigation.height / 2;
+  pageNavigation.backgroundColor = ACSENT_COLOR;
+  pageNavigation.centerPos.x += button.width / 2 - pageNavigation.width / 2;
+
+  pageNavigationLabel.content = ">";
+  pageNavigationLabel.startPos.x = pageNavigation.centerPos.x - (float)DEFAULT_CHARACTER_WIDTH / 2;
+  pageNavigationLabel.startPos.y = pageNavigation.centerPos.y - (float)DEFAULT_LINE_HEIGHT / 3.3;
+  if (hasNextPage) {
+    oui_draw_text(ouiContext, &pageNavigationLabel);
+  }
+
+  pageNavigation.centerPos.x -= button.width - pageNavigation.width;
+  pageNavigationLabel.content = "<";
+  pageNavigationLabel.startPos.x = pageNavigation.centerPos.x - (float)DEFAULT_CHARACTER_WIDTH / 2;
+  if (hasPrevPage) {
+    oui_draw_text(ouiContext, &pageNavigationLabel);
   }
 }
 
@@ -2497,16 +2764,32 @@ void delete_entity(EntityManager *entityManager, EntityId id) {
     return;
   }
 
+  entityManager->initNeedles[id] = NO;
+  entityManager->initialState[id] = 0;
+  for (int i = 0; i < entityManager->count; i++) {
+    entityManager->assertMatrix[id * MAX_ENTITIES + i] = 0;
+    entityManager->assertMatrix[i * MAX_ENTITIES + id] = 0;
+
+    entityManager->performMatrix[id * MAX_ENTITIES + i] = 0;
+    entityManager->performMatrix[i * MAX_ENTITIES + id] = 0;
+  }
+
   Entity *deleteMe = get_entity(entityManager, id);
+  if (deleteMe->type == ENTITY_TYPE_RESOURCE) {
+    for (int i = 0; i < entityManager->count; i++) {
+      if (entityManager->initialState[i] == id) {
+        entityManager->initialState[i] = NIL;
+      }
+    }
 
-  // if id is a node, delete all the links that connect to it
-  if (deleteMe->type == ENTITY_TYPE_NODE) {
-    for (int i = 1; i < entityManager->count; i++) {
-      Entity *e = get_entity(entityManager, i);
-
-      if (e->type == ENTITY_TYPE_LINK && (e->edgeA == id || e->edgeB == id)) {
-        // TODO: the link can be the selected which would make app->selectedLinkId invalid
-        memset(&(entityManager->entities[i]), 0, sizeof(Entity));
+    for (int i = 0; i < entityManager->count; i++) {
+      for (int j = 0; j < entityManager->count; j++) {
+        if (entityManager->assertMatrix[i * MAX_ENTITIES + j] == id) {
+          entityManager->assertMatrix[i * MAX_ENTITIES + j] = NIL;
+        }
+        if (entityManager->performMatrix[i * MAX_ENTITIES + j] == id) {
+          entityManager->performMatrix[i * MAX_ENTITIES + j] = NIL;
+        }
       }
     }
   }
@@ -2811,6 +3094,7 @@ void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action
   (void)mods;
 }
 
+// TODO: save BPM too
 void save_project(AppState *app) {
   if (app == NULL) {
     return;
@@ -2826,6 +3110,7 @@ void save_project(AppState *app) {
   if (path == NULL) {
     return;
   }
+
   nob_log(NOB_INFO, "Saving to file: %s\n", path);
   FILE *saveFile = fopen(path, "w");
 
@@ -2836,8 +3121,7 @@ void save_project(AppState *app) {
     Entity *e = get_entity(entityManager, i);
 
     if (e->type == ENTITY_TYPE_RESOURCE) {
-      // TODO: serialize the color of the resource
-      nob_log(NOB_INFO, "R %s", e->buffer);
+      nob_log(NOB_INFO, "R %f %f %f %f %s", e->color.r, e->color.g, e->color.b, e->color.a, e->buffer);
       fprintf(saveFile, "R %f %f %f %f %s\n", e->color.r, e->color.g, e->color.b, e->color.a, e->buffer);
     }
   }
@@ -2847,32 +3131,34 @@ void save_project(AppState *app) {
     Entity *e = get_entity(entityManager, i);
 
     if (e->type == ENTITY_TYPE_NODE) {
-      int foundResource = 0;
+      int foundResource = NO;
       EntityId mappedResourceId = NIL;
-      for (int j = 1; j < entityManager->count && !foundResource; j++) {
+
+      for (int j = 1; j < entityManager->count && foundResource == NO; j++) {
         Entity *r = get_entity(entityManager, j);
 
         if (r->type == ENTITY_TYPE_RESOURCE) {
           mappedResourceId++;
 
           if (j == entityManager->initialState[i]) {
-            foundResource = 1;
+            foundResource = YES;
             break;
           }
         }
       }
 
-      nob_log(NOB_INFO, "N %d %d", foundResource ? mappedResourceId : NIL, entityManager->initNeedles[i]);
-      fprintf(saveFile, "N %d %d\n", foundResource ? mappedResourceId : NIL, entityManager->initNeedles[i]);
+      mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+      nob_log(NOB_INFO, "N %d %d", mappedResourceId, entityManager->initNeedles[i]);
+      fprintf(saveFile, "N %d %d\n", mappedResourceId, entityManager->initNeedles[i]);
     }
   }
 
-  // save the links (with initial state)
+  // save the links
   for (int i = 1; i < entityManager->count; i++) {
     Entity *e = get_entity(entityManager, i);
 
     if (e->type == ENTITY_TYPE_LINK) {
-      int foundA = 0, foundB = 0;
+      int foundA = NO, foundB = NO;
       EntityId mappedEdgeAId = NIL;
       EntityId mappedEdgeBId = NIL;
 
@@ -2888,14 +3174,16 @@ void save_project(AppState *app) {
           }
 
           if (e->edgeA == j) {
-            foundA = 1;
+            foundA = YES;
           }
           if (e->edgeB == j) {
-            foundB = 1;
+            foundB = YES;
           }
         }
       }
 
+      mappedEdgeAId = foundA == NO ? NIL : mappedEdgeAId;
+      mappedEdgeBId = foundB == NO ? NIL : mappedEdgeBId;
       nob_log(NOB_INFO, "L %d %d %d", mappedEdgeAId, mappedEdgeBId, entityManager->initialState[i]);
       fprintf(saveFile, "L %d %d %d\n", mappedEdgeAId, mappedEdgeBId, entityManager->initialState[i]);
     }
@@ -2918,8 +3206,9 @@ void save_project(AppState *app) {
           mappedNodeId++;
 
           if (entityManager->assertMatrix[i * MAX_ENTITIES + j] != NIL) {
-            int foundResource = 0;
+            int foundResource = NO;
             EntityId mappedResourceId = NIL;
+
             for (int k = 1; k < entityManager->count && !foundResource; k++) {
               Entity *r = get_entity(entityManager, k);
 
@@ -2927,12 +3216,13 @@ void save_project(AppState *app) {
                 mappedResourceId++;
 
                 if (k == entityManager->assertMatrix[i * MAX_ENTITIES + j]) {
-                  foundResource = 1;
+                  foundResource = YES;
                   break;
                 }
               }
             }
 
+            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
             nob_log(NOB_INFO, "A N %d %d %d", mappedLinkId, mappedNodeId, mappedResourceId);
             fprintf(saveFile, "A N %d %d %d\n", mappedLinkId, mappedNodeId, mappedResourceId);
           }
@@ -2965,8 +3255,9 @@ void save_project(AppState *app) {
           mappedNodeId++;
 
           if (entityManager->performMatrix[i * MAX_ENTITIES + j] != NIL) {
-            int foundResource = 0;
+            int foundResource = NO;
             EntityId mappedResourceId = NIL;
+
             for (int k = 1; k < entityManager->count && !foundResource; k++) {
               Entity *r = get_entity(entityManager, k);
 
@@ -2974,12 +3265,13 @@ void save_project(AppState *app) {
                 mappedResourceId++;
 
                 if (k == entityManager->performMatrix[i * MAX_ENTITIES + j]) {
-                  foundResource = 1;
+                  foundResource = YES;
                   break;
                 }
               }
             }
 
+            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
             nob_log(NOB_INFO, "P N %d %d %d", mappedLinkId, mappedNodeId, mappedResourceId);
             fprintf(saveFile, "P N %d %d %d\n", mappedLinkId, mappedNodeId, mappedResourceId);
           }
@@ -2998,6 +3290,8 @@ void save_project(AppState *app) {
   fclose(saveFile);
 }
 
+// TODO: if the project only contains resources
+// the last resources gets loaded twice for some reason
 void load_project(AppState *app) {
   if (app == NULL) {
     return;
@@ -3016,14 +3310,30 @@ void load_project(AppState *app) {
     return;
   }
 
+  // TODO: clean me up
+  // the node movement get caothic the instant they are loaded
+  // maybe serializing the positions too would hurt (meh)
+  app->togglePhysics = OFF;
+
   int size = 2048;
   char line[size];
   FILE *projectFile = fopen(path, "r");
+  nob_log(NOB_INFO, "Loading project: %s", path);
 
-  EntityId baseEntityId = NIL;
   EntityId baseNodeId = NIL;
   EntityId baseLinkId = NIL;
+  EntityId baseResourceId = NIL;
+  OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  float offsetX = 1000;
+  float offsetY = 1000;
+  float baseX = -windowWidth / 2 + offsetX;
+  float baseY = -windowHeight / 2 + offsetY;
 
   while (!feof(projectFile)) {
     fgets(line, size, projectFile);
@@ -3031,21 +3341,34 @@ void load_project(AppState *app) {
 
     if (line[0] == 'R') {
       EntityId resourceId = create_entity(entityManager);
+      if (baseResourceId == NIL) {
+        baseResourceId = resourceId;
+      }
+
       Entity *resource = get_entity(entityManager, resourceId);
 
       resource->type = ENTITY_TYPE_RESOURCE;
-      sscanf(line, "R %f %f %f %f %s", &resource->color.r, &resource->color.g, &resource->color.b, &resource->color.a, resource->buffer);
-      /*      snprintf(resource->buffer, BUFFER_SIZE, "%s", (char *)(line + 2));*/
+      //      sscanf(line, "R %f %f %f %f %s", &resource->color.r, &resource->color.g, &resource->color.b, &resource->color.a, resource->buffer);
+      sscanf(line, "R %f %f %f %f", &resource->color.r, &resource->color.g, &resource->color.b, &resource->color.a, resource->buffer);
 
-      if (baseEntityId == NIL) {
-        baseEntityId = resourceId;
+      int countSpaces = 0;
+      size_t prefixLength = 0;
+
+      while (countSpaces < 5 && prefixLength < strlen(line)) {
+        countSpaces += line[prefixLength] == ' ';
+        prefixLength++;
       }
 
-      // TODO: clean me up
-      /*      resource->color.r = rand() % 256;
-            resource->color.g = rand() % 256;
-            resource->color.b = rand() % 256;
-            resource->color.a = 256;*/
+      if (prefixLength < strlen(line)) {
+        snprintf(resource->buffer, BUFFER_SIZE, "%s", line + prefixLength);
+      }
+
+      if (
+          resource->buffer[0] != '\0' &&
+          resource->buffer[strlen(resource->buffer) - 1] == '\n') {
+        // fgets keeps the newline at the end
+        resource->buffer[strlen(resource->buffer) - 1] = '\0';
+      }
 
       append_child(entityManager, app->resourceManagerId, resourceId);
       nob_log(NOB_INFO, "Loaded a resource: %d %f %f %f %f %s", resourceId, resource->color.r, resource->color.g, resource->color.b, resource->color.a, resource->buffer);
@@ -3055,36 +3378,37 @@ void load_project(AppState *app) {
         baseNodeId = nodeId;
       }
 
-      Entity *node = get_entity(entityManager, nodeId);
-      node->position.x = rand() % 200 - 100;
-      node->position.y = rand() % 200 - 100;
-
+      int isNeedle = NO;
       EntityId resourceId = NIL;
-      sscanf(line, "N %d %d", &resourceId, &entityManager->initNeedles[nodeId]);
+      sscanf(line, "N %d %d", &resourceId, &isNeedle);
 
       if (resourceId != NIL) {
-        nob_log(NOB_INFO, "resource: %d", resourceId + baseEntityId - 1);
-        entityManager->initialState[nodeId] = resourceId + baseEntityId - 1;
+        entityManager->initialState[nodeId] = resourceId + baseResourceId - 1;
       }
+
+      if (isNeedle == YES) {
+        entityManager->initNeedles[nodeId] = YES;
+      }
+
+      nob_log(NOB_INFO, "Loaded a node: %d %d %d", nodeId, resourceId, isNeedle);
     } else if (line[0] == 'L') {
-      char dummy;
       LinkState state;
       EntityId aId, bId;
-      sscanf(line, "%c %d %d %d", &dummy, &aId, &bId, &state);
+      sscanf(line, "L %d %d %d", &aId, &bId, &state);
 
       EntityId linkId = create_link(app, baseNodeId + aId - 1, baseNodeId + bId - 1);
       if (baseLinkId == NIL) {
         baseLinkId = linkId;
       }
-      Entity *link = get_entity(entityManager, linkId);
 
-      link->state = state;
+      entityManager->initialState[linkId] = state;
       nob_log(NOB_INFO, "Loaded a link: %d %d %d %d", linkId, aId + baseNodeId - 1, bId + baseNodeId - 1, state);
     } else if (line[0] == 'A') {
       if (line[2] == 'N') {
         EntityId linkId, nodeId, resourceId;
         sscanf(line, "A N %d %d %d", &linkId, &nodeId, &resourceId);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseEntityId - 1;
+        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+
       } else if (line[2] == 'L') {
         LinkState state;
         EntityId linkId, otherLinkId;
@@ -3095,13 +3419,20 @@ void load_project(AppState *app) {
       if (line[2] == 'N') {
         EntityId linkId, nodeId, resourceId;
         sscanf(line, "P N %d %d %d", &linkId, &nodeId, &resourceId);
-        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseEntityId - 1;
+        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+
       } else if (line[2] == 'L') {
         LinkState state;
         EntityId linkId, otherLinkId;
         sscanf(line, "P L %d %d %d", &linkId, &otherLinkId, &state);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseLinkId - 1] = state;
+        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseLinkId - 1] = state;
       }
+    }
+
+    baseX += offsetX;
+    if (baseX >= windowWidth / 2 - offsetX) {
+      baseX = -windowWidth / 2 + offsetX;
+      baseY += offsetY;
     }
   }
 

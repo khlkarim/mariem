@@ -6,3 +6,5 @@ compile_commands.json
 vgcore.*
 gmon.out
 *_dump*
+data 
+audacity

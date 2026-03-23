@@ -19,6 +19,9 @@ test-miniaudio: build
 test-tinyfiledialogs:
 	$(CC) $(COMMON_CFLAGS) -o build/test-tinyfiledialogs src/hello.c src/tinyfiledialogs.c $(COMMON_INCLUDES)
 
+gen: build
+	$(CC) $(COMMON_CFLAGS) -o build/gen src/gen.c $(COMMON_INCLUDES) -D_DEFAULT_SOURCE
+
 build:
 	mkdir -pv build
 
