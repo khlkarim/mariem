@@ -29,6 +29,7 @@ digital circuits
 Implementation details
                       Oui
 Memory consupmtion
+the physics stuff
 
                       Testing 
                                             Fuzzy test
@@ -49,6 +50,7 @@ How runaway was made
 Opinionated design desicions
 Possible improvements 
 TODO 
+                      the layout system
 
 
 

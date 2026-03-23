@@ -1,4 +1,5 @@
 #include "tinyfiledialogs.h"
+#include <wchar.h>
 
 #define NOB_IMPLEMENTATION
 #include "nob.h"
@@ -101,8 +102,6 @@ static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
 NtVec2f get_mouse_position(OuiContext *ouiContext);
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
-
-int get_cwd(char *result, size_t bufferSize);
 // ------------------ Input Handling ------------------
 
 // ---------------- Entity Management -----------------
@@ -174,7 +173,6 @@ typedef struct Entity {
 
   float BPM;
   int isPaused;
-  int isEnabled;
   int isInitialized;
   float hasBeenPlayingFor;
 
@@ -208,13 +206,12 @@ typedef struct EntityManager {
   int initNeedles[MAX_ENTITIES];
   int prevNeedles[MAX_ENTITIES];
   int currNeedles[MAX_ENTITIES];
-  // if i is a node, initNeedles[i] = NO, if i is a needle head for the graph player
+  // if i is a node, initNeedles[i] = ON if i is a starting node for the graph interpreter
   // prevNeedles and currNeedles are used to compute the next state of the graph
 
   int countNodes;
   EntityId nodeIds[MAX_ENTITIES];
   // at the start of each physics frame, this array gets filled with the ids of all the nodes in the scene
-  // its used in the sweep and prune collision detection
 
   int collisionLinkedList[MAX_ENTITIES * MAX_ENTITIES];
   // if i is a node, row i represents a linked list of the other nodes i collides with
@@ -226,12 +223,16 @@ typedef struct EntityManager {
   // this is the initial state of the graph
 
   EntityId assertMatrix[MAX_ENTITIES * MAX_ENTITIES];
-  // if i is a link and j is another entity
+  // if i is a link and j is a node
   // => assertMatrix[i * MAX_ENTITIES + j] = the id of the resource that should be attributed to j, in order for i to be triggarable
+  // if i is a link and j is a link
+  // => assertMatrix[i * MAX_ENTITIES + j] = the state (LinkState) that j should be in, in order for i to be triggarable
 
   EntityId performMatrix[MAX_ENTITIES * MAX_ENTITIES];
-  // if i is a link and j is a entity
+  // if i is a link and j is a node
   // => performMatrix[i * MAX_ENTITIES + j] = the id of the resource that should be attributed to j after i is triggered
+  // if i is a link and j is a link
+  // => performMatrix[i * MAX_ENTITIES + j] = the state (LinkState) that j should be in after i is triggared
 } EntityManager;
 
 EntityId create_entity(EntityManager *entityManager);
@@ -248,7 +249,6 @@ void set_initial_state(EntityManager *entityManager, EntityId id, EntityId resou
 void set_assert_state(EntityManager *entityManager, EntityId selectedLinkId, EntityId id, EntityId resourceId);
 void set_perform_state(EntityManager *entityManager, EntityId selectedLinkId, EntityId id, EntityId resourceId);
 
-// Sweep and prune collision detection
 typedef enum SortAxis {
   SORT_AXIS_X,
   SORT_AXIS_Y,
@@ -260,8 +260,6 @@ void heap_push(EntityManager *entityManager, int val, SortAxis sortAxis);
 int x_axis_comparator(EntityManager *entityManager, EntityId aId, EntityId bId);
 int y_axis_comparator(EntityManager *entityManager, EntityId aId, EntityId bId);
 void heap_sort(EntityManager *entityManager, SortAxis sortAxis);
-// Sweep and prune collision detection
-
 // ---------------- Entity Management -----------------
 
 // -------------------- App State ---------------------
@@ -344,9 +342,9 @@ void process_graph(AppState *app);
 void play_beat(AppState *app);
 
 void handle_physics(AppState *app);
+void apply_forces(AppState *app);
 void detect_collisions(AppState *app);
 void resolve_collisions(AppState *app);
-void apply_forces(AppState *app);
 void flag_collision_x_axis(AppState *app, EntityId aId, EntityId bId);
 
 void draw_node(AppState *app, EntityId id);
@@ -361,6 +359,8 @@ void draw_resource_manager(AppState *app);
 
 void load_project(AppState *app);
 void save_project(AppState *app);
+
+int get_cwd(char *result, size_t bufferSize);
 // -------------------- App State ---------------------
 
 int main(int argc, char **argv) {
@@ -580,15 +580,7 @@ void handle_key_bindings(AppState *app) {
 
   state = keyboard_key_states[KEYBINDING_PLAYING_MODE];
   if (state == PRESSED) {
-    Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
-
-    if (app->inputMode != INPUT_MODE_PLAYING) {
-      app->inputMode = INPUT_MODE_PLAYING;
-      graphInterpreter->isEnabled = YES;
-    } else {
-      app->inputMode = INPUT_MODE_INITIALIZE;
-      graphInterpreter->isEnabled = NO;
-    }
+    app->inputMode = app->inputMode == INPUT_MODE_INITIALIZE ? INPUT_MODE_PLAYING : INPUT_MODE_INITIALIZE;
     keyboard_key_states[KEYBINDING_PLAYING_MODE] = RELEASED;
   }
 
@@ -655,12 +647,10 @@ void handle_mouse_click(AppState *app) {
   link_mouse_event_handler(app);
   node_mouse_event_handler(app);
 
-  // currently, if you click empty space and then hold the mouse and keep moving it
-  // if you pass it on top an element that listens for a click event it will be triggered
+  // currently, if you click in empty space and than hold the mouse and keep moving it
+  // if you pass it through an element that listens for a click event it will be triggered
   // because glfw never sent the release event
-  //
-  // this behavior is usually undesirable so lets just consume the click event
-  // if no one consumed it in the current frame
+  // this behavior is usually undesirable so lets just consume the click event if no one consumed it in the current frame
   if (mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] != HELD) {
     mouse_button_states[GLFW_MOUSE_BUTTON_LEFT] = RELEASED;
   }
@@ -1015,7 +1005,7 @@ void link_mouse_event_handler(AppState *app) {
   if (state == PRESSED) {
     EntityId clickedLinkId = get_clicked_link(app);
 
-    if (mode == INPUT_MODE_INITIALIZE || mode == INPUT_MODE_PLAYING) {
+    if (mode == INPUT_MODE_INITIALIZE) {
       if (brush->firstChild != NIL) {
         set_initial_state(entityManager, clickedLinkId, brush->firstChild);
       } else {
@@ -1756,13 +1746,13 @@ void process_graph(AppState *app) {
   EntityManager *entityManager = &(app->entityManager);
   Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
 
-  if (graphInterpreter->isEnabled == NO) {
+  if (app->inputMode != INPUT_MODE_PLAYING) {
     graphInterpreter->isInitialized = NO;
     graphInterpreter->hasBeenPlayingFor = 0;
     return;
   }
 
-  if (graphInterpreter->isPaused == YES) {
+  if (graphInterpreter->isPaused) {
     return;
   }
 
@@ -1777,93 +1767,121 @@ void process_graph(AppState *app) {
     return;
   }
 
-  // accumulate time and if it reachs the BPM duration
-  // check if you can perform a transition
-  float beatDuration = 1 / (graphInterpreter->BPM / 60);
-  graphInterpreter->hasBeenPlayingFor += dt;
+  if (app->inputMode == INPUT_MODE_PLAYING) {
+    // accumulate time and if it reachs the BPM duration
+    // check if you can perform a transition
+    float beatDuration = 1 / (graphInterpreter->BPM / 60);
+    graphInterpreter->hasBeenPlayingFor += dt;
 
-  if (graphInterpreter->hasBeenPlayingFor >= beatDuration) {
-    // iterate over all the link that connected to this node
-    // compare their asserts to the current state of the graph
-    // if the assert of a transition is valid, execute its perform statements
+    if (graphInterpreter->hasBeenPlayingFor >= beatDuration) {
+      // iterate over all the link that connected to this node
+      // compare their asserts to the current state of the graph
+      // if the assert of a transition is valid, execute its perform statements
 
-    for (int i = 1; i < entityManager->count; i++) {
-      entityManager->prevState[i] = entityManager->currState[i];
+      for (int i = 1; i < entityManager->count; i++) {
+        entityManager->prevState[i] = entityManager->currState[i];
+        entityManager->prevNeedles[i] = entityManager->currNeedles[i];
+      }
 
-      entityManager->prevNeedles[i] = entityManager->currNeedles[i];
-      entityManager->currNeedles[i] = NO;
-    }
+      for (int i = 1; i < entityManager->count; i++) {
+        Entity *curr = get_entity(entityManager, i);
 
-    for (int i = 1; i < entityManager->count; i++) {
-      Entity *curr = get_entity(entityManager, i);
+        if (curr->type == ENTITY_TYPE_NODE && entityManager->prevNeedles[i] == YES) {
+          EntityId currentNode = i;
+          nob_log(NOB_INFO, "Current node: %d", currentNode);
 
-      if (curr->type == ENTITY_TYPE_NODE && entityManager->prevNeedles[i] == YES) {
-        EntityId currentNode = i;
-        nob_log(NOB_INFO, "Current node: %d", currentNode);
+          nob_log(NOB_INFO, "Interating over the links:");
+          for (int j = 1; j < entityManager->count; j++) {
+            Entity *link = get_entity(entityManager, j);
 
-        nob_log(NOB_INFO, "Interating over the links:");
-        for (int j = 1; j < entityManager->count; j++) {
-          Entity *link = get_entity(entityManager, j);
+            if (link->type == ENTITY_TYPE_LINK && link->edgeA == currentNode) {
+              nob_log(NOB_INFO, " Found a link connected to the currentNode %d: %d", i, j);
 
-          if (link->type == ENTITY_TYPE_LINK && link->edgeA == currentNode) {
-            nob_log(NOB_INFO, " Found a link connected to the currentNode %d: %d", i, j);
-
-            // check if the assert is true
-            int assertIsValid = YES;
-            nob_log(NOB_INFO, " Checking if its assert is valid");
-
-            for (int k = 1; k < entityManager->count; k++) {
-              EntityId assertedResourceId = get_assert_state(entityManager, j, k);
-
-              if (
-                  assertedResourceId != NIL &&
-                  entityManager->prevState[k] != assertedResourceId) {
-                nob_log(NOB_INFO, "   Assert is not valid because of node %d", k);
-                assertIsValid = NO;
-              }
-            }
-
-            if (assertIsValid) {
-              nob_log(NOB_INFO, " Transitioning from %d to %d using the %d", link->edgeA, link->edgeB, j);
+              // check if the assert is true
+              int assertIsValid = YES;
+              nob_log(NOB_INFO, " Checking if its assert is valid");
 
               for (int k = 1; k < entityManager->count; k++) {
-                EntityId performedResourceId = get_perform_state(entityManager, j, k);
+                // Entity *e = get_entity(entityManager, k);
+                EntityId assertedResourceId = get_assert_state(entityManager, j, k);
 
-                if (performedResourceId != NIL) {
-                  entityManager->currState[k] = performedResourceId;
+                if (
+                    assertedResourceId != NIL &&
+                    entityManager->prevState[k] != assertedResourceId) {
+                  nob_log(NOB_INFO, "   Assert is not valid because of node %d", k);
+                  assertIsValid = NO;
                 }
+
+                /* if (e->type == ENTITY_TYPE_NODE) {
+                   EntityId assertedResourceId = get_assert_link_node(entityManager, j, k);
+
+                   if (
+                       assertedResourceId != NIL &&
+                       entityManager->prevState[k] != assertedResourceId) {
+                     nob_log(NOB_INFO, "   Assert is not valid because of node %d", k);
+                     assertIsValid = NO;
+                   }
+                 } else if (e->type == ENTITY_TYPE_LINK) {
+                   LinkState assertedLinkState = get_assert_link_link(entityManager, j, k);
+
+                   if (
+                       assertedLinkState != LINK_STATE_NONE &&
+                       entityManager->prevState[k] != (int)assertedLinkState) {
+                     nob_log(NOB_INFO, "   Assert is not valid because of link %d", k);
+                     assertIsValid = NO;
+                   }
+                 }*/
               }
 
-              entityManager->currNeedles[link->edgeA] |= 1;
-              entityManager->currNeedles[link->edgeB] |= 2;
+              if (assertIsValid) {
+                nob_log(NOB_INFO, " Transitioning from %d to %d using the %d", link->edgeA, link->edgeB, j);
+
+                for (int k = 1; k < entityManager->count; k++) {
+                  // Entity *e = get_entity(entityManager, k);
+                  EntityId performedResourceId = get_perform_state(entityManager, j, k);
+
+                  if (performedResourceId != NIL) {
+                    entityManager->currState[k] = performedResourceId;
+                  }
+
+                  /*if (e->type == ENTITY_TYPE_NODE) {
+                    EntityId performedResourceId = get_perform_link_node(entityManager, j, k);
+
+                    if (performedResourceId != NIL) {
+                      entityManager->currState[k] = performedResourceId;
+                    }
+                  } else if (e->type == ENTITY_TYPE_LINK) {
+                    LinkState performedLinkState = get_perform_link_link(entityManager, j, k);
+
+                    if (performedLinkState != LINK_STATE_NONE) {
+                      entityManager->currState[k] = performedLinkState;
+                    }
+                  }*/
+                }
+
+                entityManager->currNeedles[link->edgeA] -= 1;
+                entityManager->currNeedles[link->edgeB] += 1;
+              }
             }
           }
+
+          graphInterpreter->hasBeenPlayingFor = 0;
         }
-
-        graphInterpreter->hasBeenPlayingFor = 0;
       }
-    }
 
-    for (int i = 1; i < entityManager->count; i++) {
-      // the ring existed you, but no reentered
-      if (
-          // you are ON if someone entered you
-          // or you were ON and noone existed you
-          (entityManager->currNeedles[i] & 2) == 2 ||
-          (entityManager->prevNeedles[i] == YES && (entityManager->currNeedles[i] & 1) == 0)) {
-        entityManager->currNeedles[i] = YES;
-      } else {
-        entityManager->currNeedles[i] = NO;
+      for (int i = 1; i < entityManager->count; i++) {
+        entityManager->currNeedles[i] = oui_max(NO, oui_min(entityManager->currNeedles[i], YES));
       }
-    }
 
-    play_beat(app);
+      play_beat(app);
+    }
   }
 }
 
 void play_beat(AppState *app) {
   if (app == NULL ||
       app->graphInterpreterId == NIL ||
+      app->inputMode != INPUT_MODE_PLAYING ||
       app->audioEngineInitStatus != MA_SUCCESS) {
     return;
   }
@@ -1872,9 +1890,7 @@ void play_beat(AppState *app) {
   EntityManager *entityManager = &(app->entityManager);
   Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
 
-  if (
-      graphInterpreter->isEnabled == NO ||
-      graphInterpreter->isPaused == YES) {
+  if (graphInterpreter->isPaused == YES) {
     return;
   }
 
@@ -2220,6 +2236,16 @@ void draw_node(AppState *app, EntityId id) {
 
   EntityId resourceId = NIL;
 
+  /*  if (mode == INPUT_MODE_INITIALIZE) {
+      resourceId = get_initial_state_node(entityManager, id);
+    } else if (mode == INPUT_MODE_ASSERT) {
+      resourceId = get_assert_link_node(entityManager, selectedLinkId, id);
+    } else if (mode == INPUT_MODE_PERFORM) {
+      resourceId = get_perform_link_node(entityManager, selectedLinkId, id);
+    } else if (mode == INPUT_MODE_PLAYING) {
+      resourceId = entityManager->currState[id];
+    }*/
+
   if (mode == INPUT_MODE_INITIALIZE) {
     resourceId = get_initial_state(entityManager, id);
   } else if (mode == INPUT_MODE_ASSERT) {
@@ -2334,38 +2360,31 @@ void draw_link(AppState *app, EntityId id) {
   rectangle.borderRadius = arrowBorderRadius;
   rectangle.borderResolution = 0;
 
+  /*  LinkState state = LINK_STATE_NONE;
+
+    if (mode == INPUT_MODE_INITIALIZE) {
+      state = get_initial_state_node(entityManager, id);
+    } else if (mode == INPUT_MODE_ASSERT) {
+      state = get_assert_link_link(entityManager, selectedLinkId, id);
+    } else if (mode == INPUT_MODE_PERFORM) {
+      state = get_perform_link_link(entityManager, selectedLinkId, id);
+    } else if (mode == INPUT_MODE_PLAYING) {
+      state = entityManager->currState[id];
+    }
+
+    rectangle.backgroundColor = link_state_colors[state];
+    if (id == selectedLinkId && state == LINK_STATE_NONE) {
+      rectangle.backgroundColor = SELECTED_NODE_COLOR;
+    }*/
+
   // draw an outline for the selected link
   if (id == selectedLinkId) {
-    rectangle.width += 3;
-    rectangle.height += 3;
+    rectangle.width += 2;
+    rectangle.height += 2;
     rectangle.backgroundColor = OUI_COLOR_WHITE;
-    rectangle.backgroundColor.a = DEFAULT_LINK_COLOR.a;
     oui_draw_rectangle(ouiContext, &rectangle);
-    rectangle.width -= 3;
-    rectangle.height -= 3;
-
-    OuiRectangle arrow = {0};
-
-    arrow.width = arrowSize + 3;
-    arrow.height = rectangle.height + 3;
-    arrow.rotationXY = rectangle.rotationXY;
-    arrow.borderRadius = rectangle.borderRadius;
-    arrow.backgroundColor = OUI_COLOR_WHITE;
-    arrow.backgroundColor.a = rectangle.backgroundColor.a;
-
-    // rotation relative to the current link direction
-    arrow.rotationXY += -NT_PI / 4;
-
-    arrow.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + arrow.width / 2) - 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
-    arrow.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + arrow.width / 2) - 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
-    oui_draw_rectangle(ouiContext, &arrow);
-
-    // rotation relative to the current link direction
-    arrow.rotationXY += NT_PI / 2;
-    arrow.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + arrow.width / 2) + 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
-    arrow.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + arrow.width / 2) + 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
-    oui_draw_rectangle(ouiContext, &arrow);
-    // Draw the arrow
+    rectangle.width -= 2;
+    rectangle.height -= 2;
   }
 
   EntityId resourceId = NIL;
@@ -2395,22 +2414,19 @@ void draw_link(AppState *app, EntityId id) {
 
   arrow.width = arrowSize;
   arrow.height = DEFAULT_LINK_THICKNESS;
-  arrow.rotationXY = rectangle.rotationXY;
-  arrow.borderRadius = rectangle.borderRadius;
-  arrow.backgroundColor = rectangle.backgroundColor;
 
   // rotation relative to the current link direction
   arrow.rotationXY += -NT_PI / 4;
 
-  arrow.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + arrow.width / 2 + 1) - 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
-  arrow.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + arrow.width / 2 + 1) - 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
+  arrow.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
+  arrow.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) - 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
   oui_draw_rectangle(ouiContext, &arrow);
 
   // rotation relative to the current link direction
   arrow.rotationXY += NT_PI / 2;
-  arrow.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + arrow.width / 2 + 1) + 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
-  arrow.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + arrow.width / 2 + 1) + 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
-  oui_draw_rectangle(ouiContext, &arrow);
+  arrow.centerPos.x = b->position.x + normalizedDiff.x * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.x + hasAnEvilTwin * gap * orthogonal.x;
+  arrow.centerPos.y = b->position.y + normalizedDiff.y * (b->radius + rectangle.width / 2 + 1) + 3 * orthogonal.y + hasAnEvilTwin * gap * orthogonal.y;
+  oui_draw_rectangle(ouiContext, &rectangle);
   // Draw the arrow
 }
 
@@ -2706,460 +2722,6 @@ void draw_resource_manager(AppState *app) {
   }
 }
 
-void save_project(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  char *path = tinyfd_saveFileDialog(
-      "Save project",
-      NULL,
-      0,
-      NULL,
-      NULL);
-
-  if (path == NULL) {
-    return;
-  }
-
-  nob_log(NOB_INFO, "Saving to file: %s\n", path);
-  FILE *saveFile = fopen(path, "w");
-
-  EntityManager *entityManager = &(app->entityManager);
-
-  if (app->graphInterpreterId != NIL) {
-    Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
-    fprintf(saveFile, "BPM %f", graphInterpreter->BPM);
-  }
-
-  // save resources
-  int countResources = 0;
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
-
-    if (e->type == ENTITY_TYPE_RESOURCE) {
-      nob_log(NOB_INFO, "R %f %f %f %f %s", e->color.r, e->color.g, e->color.b, e->color.a, e->buffer);
-      fprintf(saveFile, "R %f %f %f %f %s\n", e->color.r, e->color.g, e->color.b, e->color.a, e->buffer);
-
-      countResources++;
-    }
-  }
-  nob_log(NOB_INFO, "Saved %d resources", countResources);
-
-  // save the nodes
-  int countNodes = 0;
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
-
-    if (e->type == ENTITY_TYPE_NODE) {
-      int foundResource = NO;
-      EntityId mappedResourceId = NIL;
-
-      for (int j = 1; j < entityManager->count && foundResource == NO; j++) {
-        Entity *r = get_entity(entityManager, j);
-
-        if (r->type == ENTITY_TYPE_RESOURCE) {
-          mappedResourceId++;
-
-          if (j == entityManager->initialState[i]) {
-            foundResource = YES;
-            break;
-          }
-        }
-      }
-
-      mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-      nob_log(NOB_INFO, "N %d %d", mappedResourceId, entityManager->initNeedles[i]);
-      fprintf(saveFile, "N %d %d\n", mappedResourceId, entityManager->initNeedles[i]);
-
-      countNodes++;
-    }
-  }
-  nob_log(NOB_INFO, "Saved %d nodes", countNodes);
-
-  // save the links
-  int countLinks = 0;
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = get_entity(entityManager, i);
-
-    if (e->type == ENTITY_TYPE_LINK) {
-      int foundA = NO, foundB = NO;
-      EntityId mappedEdgeAId = NIL;
-      EntityId mappedEdgeBId = NIL;
-
-      for (int j = 1; j < entityManager->count && (!foundA || !foundB); j++) {
-        Entity *a = get_entity(entityManager, j);
-
-        if (a->type == ENTITY_TYPE_NODE) {
-          if (!foundA) {
-            mappedEdgeAId++;
-          }
-          if (!foundB) {
-            mappedEdgeBId++;
-          }
-
-          if (e->edgeA == j) {
-            foundA = YES;
-          }
-          if (e->edgeB == j) {
-            foundB = YES;
-          }
-        }
-      }
-
-      int foundResource = NO;
-      EntityId mappedResourceId = NIL;
-
-      for (int j = 1; j < entityManager->count && foundResource == NO; j++) {
-        Entity *r = get_entity(entityManager, j);
-
-        if (r->type == ENTITY_TYPE_RESOURCE) {
-          mappedResourceId++;
-
-          if (j == entityManager->initialState[i]) {
-            foundResource = YES;
-            break;
-          }
-        }
-      }
-
-      mappedEdgeAId = foundA == NO ? NIL : mappedEdgeAId;
-      mappedEdgeBId = foundB == NO ? NIL : mappedEdgeBId;
-      mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-      nob_log(NOB_INFO, "L %d %d %d", mappedEdgeAId, mappedEdgeBId, mappedResourceId);
-      fprintf(saveFile, "L %d %d %d\n", mappedEdgeAId, mappedEdgeBId, mappedResourceId);
-
-      countLinks++;
-    }
-  }
-  nob_log(NOB_INFO, "Saved %d links", countLinks);
-
-  // save assert matrix
-  int countAsserts = 0;
-  EntityId mappedLinkId = NIL;
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *link = get_entity(entityManager, i);
-
-    if (link->type == ENTITY_TYPE_LINK) {
-      mappedLinkId++;
-
-      EntityId mappedNodeId = NIL;
-      EntityId mappedOtherLinkId = NIL;
-      for (int j = 1; j < entityManager->count; j++) {
-        Entity *e = get_entity(entityManager, j);
-
-        if (e->type == ENTITY_TYPE_NODE) {
-          mappedNodeId++;
-
-          if (entityManager->assertMatrix[i * MAX_ENTITIES + j] != NIL) {
-            int foundResource = NO;
-            EntityId mappedResourceId = NIL;
-
-            for (int k = 1; k < entityManager->count && !foundResource; k++) {
-              Entity *r = get_entity(entityManager, k);
-
-              if (r->type == ENTITY_TYPE_RESOURCE) {
-                mappedResourceId++;
-
-                if (k == entityManager->assertMatrix[i * MAX_ENTITIES + j]) {
-                  foundResource = YES;
-                  break;
-                }
-              }
-            }
-
-            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-            nob_log(NOB_INFO, "A N %d %d %d", mappedLinkId, mappedNodeId, mappedResourceId);
-            fprintf(saveFile, "A N %d %d %d\n", mappedLinkId, mappedNodeId, mappedResourceId);
-
-            countAsserts++;
-          }
-        } else if (e->type == ENTITY_TYPE_LINK) {
-          mappedOtherLinkId++;
-
-          if (entityManager->assertMatrix[i * MAX_ENTITIES + j] != NIL) {
-            int foundResource = NO;
-            EntityId mappedResourceId = NIL;
-
-            for (int k = 1; k < entityManager->count && !foundResource; k++) {
-              Entity *r = get_entity(entityManager, k);
-
-              if (r->type == ENTITY_TYPE_RESOURCE) {
-                mappedResourceId++;
-
-                if (k == entityManager->assertMatrix[i * MAX_ENTITIES + j]) {
-                  foundResource = YES;
-                  break;
-                }
-              }
-            }
-
-            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-            nob_log(NOB_INFO, "A L %d %d %d", mappedLinkId, mappedOtherLinkId, mappedResourceId);
-            fprintf(saveFile, "A L %d %d %d\n", mappedLinkId, mappedOtherLinkId, mappedResourceId);
-
-            countAsserts++;
-          }
-        }
-      }
-    }
-  }
-  nob_log(NOB_INFO, "Saved %d assert statements", countAsserts);
-
-  // save perform matrix
-  int countPerforms = 0;
-  mappedLinkId = NIL;
-  for (int i = 1; i < entityManager->count; i++) {
-    Entity *link = get_entity(entityManager, i);
-
-    if (link->type == ENTITY_TYPE_LINK) {
-      mappedLinkId++;
-
-      EntityId mappedNodeId = NIL;
-      EntityId mappedOtherLinkId = NIL;
-      for (int j = 1; j < entityManager->count; j++) {
-        Entity *e = get_entity(entityManager, j);
-
-        if (e->type == ENTITY_TYPE_NODE) {
-          mappedNodeId++;
-
-          if (entityManager->performMatrix[i * MAX_ENTITIES + j] != NIL) {
-            int foundResource = NO;
-            EntityId mappedResourceId = NIL;
-
-            for (int k = 1; k < entityManager->count && !foundResource; k++) {
-              Entity *r = get_entity(entityManager, k);
-
-              if (r->type == ENTITY_TYPE_RESOURCE) {
-                mappedResourceId++;
-
-                if (k == entityManager->performMatrix[i * MAX_ENTITIES + j]) {
-                  foundResource = YES;
-                  break;
-                }
-              }
-            }
-
-            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-            nob_log(NOB_INFO, "P N %d %d %d", mappedLinkId, mappedNodeId, mappedResourceId);
-            fprintf(saveFile, "P N %d %d %d\n", mappedLinkId, mappedNodeId, mappedResourceId);
-
-            countPerforms++;
-          }
-        } else if (e->type == ENTITY_TYPE_LINK) {
-          mappedOtherLinkId++;
-
-          if (entityManager->performMatrix[i * MAX_ENTITIES + j] != NIL) {
-            int foundResource = NO;
-            EntityId mappedResourceId = NIL;
-
-            for (int k = 1; k < entityManager->count && !foundResource; k++) {
-              Entity *r = get_entity(entityManager, k);
-
-              if (r->type == ENTITY_TYPE_RESOURCE) {
-                mappedResourceId++;
-
-                if (k == entityManager->performMatrix[i * MAX_ENTITIES + j]) {
-                  foundResource = YES;
-                  break;
-                }
-              }
-            }
-
-            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-            nob_log(NOB_INFO, "P L %d %d %d", mappedLinkId, mappedOtherLinkId, mappedResourceId);
-            fprintf(saveFile, "P L %d %d %d\n", mappedLinkId, mappedOtherLinkId, mappedResourceId);
-
-            countPerforms++;
-          }
-        }
-      }
-    }
-  }
-  nob_log(NOB_INFO, "Saved %d perform statements", countPerforms);
-
-  fclose(saveFile);
-}
-
-// TODO: the last line is getting loaded twice
-// (feof is not reporting the end of file correctly)
-void load_project(AppState *app) {
-  if (app == NULL) {
-    return;
-  }
-
-  char *path = tinyfd_openFileDialog(
-      "Open Project",
-      NULL,
-      0,
-      NULL,
-      NULL,
-      0);
-
-  if (path == NULL) {
-    nob_log(NOB_WARNING, "NULL file path");
-    return;
-  }
-
-  int size = 2048;
-  char line[size];
-  FILE *projectFile = fopen(path, "r");
-  nob_log(NOB_INFO, "Loading project: %s", path);
-
-  EntityId baseNodeId = NIL;
-  EntityId baseLinkId = NIL;
-  EntityId baseResourceId = NIL;
-  EntityManager *entityManager = &(app->entityManager);
-
-  int countNodes = 0;
-  int countLinks = 0;
-  int countAsserts = 0;
-  int countPerforms = 0;
-  int countResources = 0;
-
-  while (!feof(projectFile)) {
-    fgets(line, size, projectFile);
-    nob_log(NOB_INFO, "Line: %s", line);
-
-    if (line[0] == 'B') { // BPM
-      long long bpmLL = strtol(line + 4, NULL, 10);
-
-      if (app->graphInterpreterId != NIL) {
-        Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
-        graphInterpreter->BPM = bpmLL;
-
-        nob_log(NOB_INFO, "Loaded the BPM: %f", graphInterpreter->BPM);
-      }
-    } else if (line[0] == 'R') {
-      EntityId resourceId = create_entity(entityManager);
-      if (baseResourceId == NIL) {
-        baseResourceId = resourceId;
-      }
-
-      Entity *resource = get_entity(entityManager, resourceId);
-
-      resource->type = ENTITY_TYPE_RESOURCE;
-      sscanf(line, "R %f %f %f %f", &resource->color.r, &resource->color.g, &resource->color.b, &resource->color.a);
-
-      int countSpaces = 0;
-      size_t prefixLength = 0;
-
-      while (countSpaces < 5 && prefixLength < strlen(line)) {
-        countSpaces += line[prefixLength] == ' ';
-        prefixLength++;
-      }
-
-      if (prefixLength < strlen(line)) {
-        snprintf(resource->buffer, BUFFER_SIZE, "%s", line + prefixLength);
-      }
-
-      if (
-          resource->buffer[0] != '\0' &&
-          resource->buffer[strlen(resource->buffer) - 1] == '\n') {
-        // fgets keeps the newline at the end
-        resource->buffer[strlen(resource->buffer) - 1] = '\0';
-      }
-
-      append_child(entityManager, app->resourceManagerId, resourceId);
-      nob_log(NOB_INFO, "Loaded a resource: %d %f %f %f %f %s", resourceId, resource->color.r, resource->color.g, resource->color.b, resource->color.a, resource->buffer);
-
-      countResources++;
-    } else if (line[0] == 'N') {
-      EntityId nodeId = create_node(app);
-      if (baseNodeId == NIL) {
-        baseNodeId = nodeId;
-      }
-
-      int isNeedle = NO;
-      EntityId resourceId = NIL;
-      sscanf(line, "N %d %d", &resourceId, &isNeedle);
-
-      if (resourceId != NIL) {
-        entityManager->initialState[nodeId] = resourceId + baseResourceId - 1;
-      }
-
-      if (isNeedle == YES) {
-        entityManager->initNeedles[nodeId] = YES;
-      }
-
-      nob_log(NOB_INFO, "Loaded a node: %d %d %d", nodeId, resourceId, isNeedle);
-
-      countNodes++;
-    } else if (line[0] == 'L') {
-      EntityId aId, bId, resourceId;
-      sscanf(line, "L %d %d %d", &aId, &bId, &resourceId);
-
-      EntityId linkId = create_link(app, baseNodeId + aId - 1, baseNodeId + bId - 1);
-      if (baseLinkId == NIL) {
-        baseLinkId = linkId;
-      }
-
-      if (resourceId != NIL) {
-        entityManager->initialState[linkId] = resourceId + baseResourceId - 1;
-      }
-      nob_log(NOB_INFO, "Loaded a link: %d %d %d %d", linkId, aId + baseNodeId - 1, bId + baseNodeId - 1, resourceId + baseResourceId - 1);
-
-      countLinks++;
-    } else if (line[0] == 'A') { // TODO: clean me up
-      if (line[2] == 'N') {
-        EntityId linkId, nodeId, resourceId;
-        sscanf(line, "A N %d %d %d", &linkId, &nodeId, &resourceId);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
-
-      } else if (line[2] == 'L') {
-        EntityId linkId, otherLinkId, resourceId;
-        sscanf(line, "A L %d %d %d", &linkId, &otherLinkId, &resourceId);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseNodeId - 1] = resourceId + baseResourceId - 1;
-      }
-
-      countAsserts++;
-    } else if (line[0] == 'P') { // TODO: clean me up
-      if (line[2] == 'N') {
-        EntityId linkId, nodeId, resourceId;
-        sscanf(line, "P N %d %d %d", &linkId, &nodeId, &resourceId);
-        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
-
-      } else if (line[2] == 'L') {
-        EntityId linkId, otherLinkId, resourceId;
-        sscanf(line, "P L %d %d %d", &linkId, &otherLinkId, &resourceId);
-        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseNodeId - 1] = resourceId + baseResourceId - 1;
-      }
-
-      countPerforms++;
-    }
-
-    // current fix for the last line getting loaded twice
-    line[0] = '\0';
-  }
-
-  nob_log(NOB_INFO, "Loaded %d resources", countResources);
-  nob_log(NOB_INFO, "Loaded %d nodes", countNodes);
-  nob_log(NOB_INFO, "Loaded %d links", countLinks);
-  nob_log(NOB_INFO, "Loaded %d assert statements", countAsserts);
-  nob_log(NOB_INFO, "Loaded %d perform statements", countPerforms);
-
-  fclose(projectFile);
-}
-
-int get_count_resources(AppState *app) {
-  if (app == NULL) {
-    return 0;
-  }
-
-  EntityManager *entityManager = &(app->entityManager);
-  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
-
-  int resourceCount = 0;
-  EntityId resourceId = resourceManager->firstChild;
-  while (resourceId != NIL) {
-    Entity *resource = get_entity(entityManager, resourceId);
-    resourceCount++;
-    resourceId = resource->nextSibling;
-  }
-
-  return resourceCount;
-}
-
 EntityId create_entity(EntityManager *entityManager) {
   assert(
       entityManager != NULL &&
@@ -3381,6 +2943,27 @@ void set_initial_state(EntityManager *entityManager, EntityId id, EntityId resou
   entityManager->initialState[id] = resourceId;
 }
 
+/*void set_initial_state_node(EntityManager *entityManager, EntityId nodeId, EntityId resourceId) {
+  if (
+      entityManager == NULL ||
+      nodeId == NIL) {
+    return;
+  }
+
+  entityManager->initialState[nodeId] = resourceId;
+}
+
+void set_initial_state_link(EntityManager *entityManager, EntityId linkId) {
+  if (
+      entityManager == NULL ||
+      linkId == NIL) {
+    return;
+  }
+
+  LinkState prevState = entityManager->initialState[linkId];
+  entityManager->initialState[linkId] = (prevState + 1) % LINK_STATE_COUNT;
+}*/
+
 void set_assert_state(EntityManager *entityManager, EntityId selectedLinkId, EntityId id, EntityId resourceId) {
   if (
       entityManager == NULL ||
@@ -3392,6 +2975,19 @@ void set_assert_state(EntityManager *entityManager, EntityId selectedLinkId, Ent
   entityManager->assertMatrix[selectedLinkId * MAX_ENTITIES + id] = resourceId;
 }
 
+/*void set_assert_link_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId assertedLinkId) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      assertedLinkId == NIL) {
+    return;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  int prevState = entityManager->assertMatrix[selectedLinkId * rowSize + assertedLinkId];
+  entityManager->assertMatrix[selectedLinkId * rowSize + assertedLinkId] = (prevState + 1) % LINK_STATE_COUNT;
+}*/
+
 void set_perform_state(EntityManager *entityManager, EntityId selectedLinkId, EntityId id, EntityId resourceId) {
   if (
       entityManager == NULL ||
@@ -3402,6 +2998,43 @@ void set_perform_state(EntityManager *entityManager, EntityId selectedLinkId, En
 
   entityManager->performMatrix[selectedLinkId * MAX_ENTITIES + id] = resourceId;
 }
+
+/*void set_perform_link_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId performedLinkId) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      performedLinkId == NIL) {
+    return;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  int prevState = entityManager->performMatrix[selectedLinkId * rowSize + performedLinkId];
+  entityManager->performMatrix[selectedLinkId * rowSize + performedLinkId] = (prevState + 1) % LINK_STATE_COUNT;
+}*/
+
+/*void set_assert_link_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId assertedNodeId, EntityId assertedResourceId) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      assertedNodeId == NIL) {
+    return;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  entityManager->assertMatrix[selectedLinkId * rowSize + assertedNodeId] = assertedResourceId;
+}
+
+void set_perform_link_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId performedNodeId, EntityId performedResourceId) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      performedNodeId == NIL) {
+    return;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  entityManager->performMatrix[selectedLinkId * rowSize + performedNodeId] = performedResourceId;
+}*/
 
 EntityId get_initial_state(EntityManager *entityManager, EntityId id) {
   if (
@@ -3424,6 +3057,28 @@ EntityId get_assert_state(EntityManager *entityManager, EntityId selectedLinkId,
   return entityManager->assertMatrix[selectedLinkId * MAX_ENTITIES + id];
 }
 
+/*LinkState get_initial_state_link(EntityManager *entityManager, EntityId linkId) {
+  if (
+      entityManager == NULL ||
+      linkId == NIL) {
+    return LINK_STATE_NONE;
+  }
+
+  return entityManager->initialState[linkId];
+}
+
+LinkState get_assert_link_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId id) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      id == NIL) {
+    return LINK_STATE_NONE;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  return entityManager->assertMatrix[selectedLinkId * rowSize + id];
+}*/
+
 EntityId get_perform_state(EntityManager *entityManager, EntityId selectedLinkId, EntityId id) {
   if (
       entityManager == NULL ||
@@ -3435,13 +3090,49 @@ EntityId get_perform_state(EntityManager *entityManager, EntityId selectedLinkId
   return entityManager->performMatrix[selectedLinkId * MAX_ENTITIES + id];
 }
 
+/*LinkState get_perform_link_link(EntityManager *entityManager, EntityId selectedLinkId, EntityId id) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      id == NIL) {
+    return LINK_STATE_NONE;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  return entityManager->performMatrix[selectedLinkId * rowSize + id];
+}*/
+
+/*EntityId get_assert_link_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId id) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      id == NIL) {
+    return NIL;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  return entityManager->assertMatrix[selectedLinkId * rowSize + id];
+}
+
+EntityId get_perform_link_node(EntityManager *entityManager, EntityId selectedLinkId, EntityId id) {
+  if (
+      entityManager == NULL ||
+      selectedLinkId == NIL ||
+      id == NIL) {
+    return NIL;
+  }
+
+  int rowSize = MAX_ENTITIES;
+  return entityManager->performMatrix[selectedLinkId * rowSize + id];
+}*/
+
 void clock_tick(Clock *clock) {
   if (clock == NULL) {
     return;
   }
 
   float now = glfwGetTime();
-  clock->dt = oui_min(now - clock->t, 0.1);
+  clock->dt = now - clock->t;
   clock->t = now;
 }
 
@@ -3472,6 +3163,438 @@ void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action
   (void)window;
   (void)scancode;
   (void)mods;
+}
+
+// TODO: save BPM too
+void save_project(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  char *path = tinyfd_saveFileDialog(
+      "Save project",
+      NULL,
+      0,
+      NULL,
+      NULL);
+
+  if (path == NULL) {
+    return;
+  }
+
+  nob_log(NOB_INFO, "Saving to file: %s\n", path);
+  FILE *saveFile = fopen(path, "w");
+
+  EntityManager *entityManager = &(app->entityManager);
+
+  Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
+  fprintf(saveFile, "BPM %f", graphInterpreter->BPM);
+
+  // save resources
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_RESOURCE) {
+      nob_log(NOB_INFO, "R %f %f %f %f %s", e->color.r, e->color.g, e->color.b, e->color.a, e->buffer);
+      fprintf(saveFile, "R %f %f %f %f %s\n", e->color.r, e->color.g, e->color.b, e->color.a, e->buffer);
+    }
+  }
+
+  // save the nodes
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_NODE) {
+      int foundResource = NO;
+      EntityId mappedResourceId = NIL;
+
+      for (int j = 1; j < entityManager->count && foundResource == NO; j++) {
+        Entity *r = get_entity(entityManager, j);
+
+        if (r->type == ENTITY_TYPE_RESOURCE) {
+          mappedResourceId++;
+
+          if (j == entityManager->initialState[i]) {
+            foundResource = YES;
+            break;
+          }
+        }
+      }
+
+      mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+      nob_log(NOB_INFO, "N %d %d", mappedResourceId, entityManager->initNeedles[i]);
+      fprintf(saveFile, "N %d %d\n", mappedResourceId, entityManager->initNeedles[i]);
+    }
+  }
+
+  // save the links
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *e = get_entity(entityManager, i);
+
+    if (e->type == ENTITY_TYPE_LINK) {
+      int foundA = NO, foundB = NO;
+      EntityId mappedEdgeAId = NIL;
+      EntityId mappedEdgeBId = NIL;
+
+      for (int j = 1; j < entityManager->count && (!foundA || !foundB); j++) {
+        Entity *a = get_entity(entityManager, j);
+
+        if (a->type == ENTITY_TYPE_NODE) {
+          if (!foundA) {
+            mappedEdgeAId++;
+          }
+          if (!foundB) {
+            mappedEdgeBId++;
+          }
+
+          if (e->edgeA == j) {
+            foundA = YES;
+          }
+          if (e->edgeB == j) {
+            foundB = YES;
+          }
+        }
+      }
+
+      int foundResource = NO;
+      EntityId mappedResourceId = NIL;
+
+      for (int j = 1; j < entityManager->count && foundResource == NO; j++) {
+        Entity *r = get_entity(entityManager, j);
+
+        if (r->type == ENTITY_TYPE_RESOURCE) {
+          mappedResourceId++;
+
+          if (j == entityManager->initialState[i]) {
+            foundResource = YES;
+            break;
+          }
+        }
+      }
+
+      mappedEdgeAId = foundA == NO ? NIL : mappedEdgeAId;
+      mappedEdgeBId = foundB == NO ? NIL : mappedEdgeBId;
+      mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+      nob_log(NOB_INFO, "L %d %d %d", mappedEdgeAId, mappedEdgeBId, mappedResourceId);
+      fprintf(saveFile, "L %d %d %d\n", mappedEdgeAId, mappedEdgeBId, mappedResourceId);
+    }
+  }
+
+  // save assert matrix
+  EntityId mappedLinkId = NIL;
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *link = get_entity(entityManager, i);
+
+    if (link->type == ENTITY_TYPE_LINK) {
+      mappedLinkId++;
+
+      EntityId mappedNodeId = NIL;
+      EntityId mappedOtherLinkId = NIL;
+      for (int j = 1; j < entityManager->count; j++) {
+        Entity *e = get_entity(entityManager, j);
+
+        if (e->type == ENTITY_TYPE_NODE) {
+          mappedNodeId++;
+
+          if (entityManager->assertMatrix[i * MAX_ENTITIES + j] != NIL) {
+            int foundResource = NO;
+            EntityId mappedResourceId = NIL;
+
+            for (int k = 1; k < entityManager->count && !foundResource; k++) {
+              Entity *r = get_entity(entityManager, k);
+
+              if (r->type == ENTITY_TYPE_RESOURCE) {
+                mappedResourceId++;
+
+                if (k == entityManager->assertMatrix[i * MAX_ENTITIES + j]) {
+                  foundResource = YES;
+                  break;
+                }
+              }
+            }
+
+            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+            nob_log(NOB_INFO, "A N %d %d %d", mappedLinkId, mappedNodeId, mappedResourceId);
+            fprintf(saveFile, "A N %d %d %d\n", mappedLinkId, mappedNodeId, mappedResourceId);
+          }
+        } else if (e->type == ENTITY_TYPE_LINK) {
+          mappedOtherLinkId++;
+
+          if (entityManager->assertMatrix[i * MAX_ENTITIES + j] != NIL) {
+            int foundResource = NO;
+            EntityId mappedResourceId = NIL;
+
+            for (int k = 1; k < entityManager->count && !foundResource; k++) {
+              Entity *r = get_entity(entityManager, k);
+
+              if (r->type == ENTITY_TYPE_RESOURCE) {
+                mappedResourceId++;
+
+                if (k == entityManager->assertMatrix[i * MAX_ENTITIES + j]) {
+                  foundResource = YES;
+                  break;
+                }
+              }
+            }
+
+            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+            nob_log(NOB_INFO, "A L %d %d %d", mappedLinkId, mappedOtherLinkId, mappedResourceId);
+            fprintf(saveFile, "A L %d %d %d\n", mappedLinkId, mappedOtherLinkId, mappedResourceId);
+          }
+
+          /*          if (entityManager->assertMatrix[i * MAX_ENTITIES + j] != NIL) {
+                      nob_log(NOB_INFO, "A L %d %d %d", mappedLinkId, mappedOtherLinkId, entityManager->assertMatrix[i * MAX_ENTITIES + j]);
+                      fprintf(saveFile, "A L %d %d %d\n", mappedLinkId, mappedOtherLinkId, entityManager->assertMatrix[i * MAX_ENTITIES + j]);
+                    }*/
+        }
+      }
+    }
+  }
+
+  // save perform matrix
+  mappedLinkId = NIL;
+  for (int i = 1; i < entityManager->count; i++) {
+    Entity *link = get_entity(entityManager, i);
+
+    if (link->type == ENTITY_TYPE_LINK) {
+      mappedLinkId++;
+
+      EntityId mappedNodeId = NIL;
+      EntityId mappedOtherLinkId = NIL;
+      for (int j = 1; j < entityManager->count; j++) {
+        Entity *e = get_entity(entityManager, j);
+
+        if (e->type == ENTITY_TYPE_NODE) {
+          mappedNodeId++;
+
+          if (entityManager->performMatrix[i * MAX_ENTITIES + j] != NIL) {
+            int foundResource = NO;
+            EntityId mappedResourceId = NIL;
+
+            for (int k = 1; k < entityManager->count && !foundResource; k++) {
+              Entity *r = get_entity(entityManager, k);
+
+              if (r->type == ENTITY_TYPE_RESOURCE) {
+                mappedResourceId++;
+
+                if (k == entityManager->performMatrix[i * MAX_ENTITIES + j]) {
+                  foundResource = YES;
+                  break;
+                }
+              }
+            }
+
+            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+            nob_log(NOB_INFO, "P N %d %d %d", mappedLinkId, mappedNodeId, mappedResourceId);
+            fprintf(saveFile, "P N %d %d %d\n", mappedLinkId, mappedNodeId, mappedResourceId);
+          }
+        } else if (e->type == ENTITY_TYPE_LINK) {
+          mappedOtherLinkId++;
+
+          if (entityManager->performMatrix[i * MAX_ENTITIES + j] != NIL) {
+            int foundResource = NO;
+            EntityId mappedResourceId = NIL;
+
+            for (int k = 1; k < entityManager->count && !foundResource; k++) {
+              Entity *r = get_entity(entityManager, k);
+
+              if (r->type == ENTITY_TYPE_RESOURCE) {
+                mappedResourceId++;
+
+                if (k == entityManager->performMatrix[i * MAX_ENTITIES + j]) {
+                  foundResource = YES;
+                  break;
+                }
+              }
+            }
+
+            mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
+            nob_log(NOB_INFO, "P L %d %d %d", mappedLinkId, mappedOtherLinkId, mappedResourceId);
+            fprintf(saveFile, "P L %d %d %d\n", mappedLinkId, mappedOtherLinkId, mappedResourceId);
+          }
+
+          /*          if (entityManager->performMatrix[i * MAX_ENTITIES + j] != NIL) {
+                      nob_log(NOB_INFO, "P L %d %d %d", mappedLinkId, mappedOtherLinkId, entityManager->performMatrix[i * MAX_ENTITIES + j]);
+                      fprintf(saveFile, "P L %d %d %d\n", mappedLinkId, mappedOtherLinkId, entityManager->performMatrix[i * MAX_ENTITIES + j]);
+                    }*/
+        }
+      }
+    }
+  }
+
+  fclose(saveFile);
+}
+
+// TODO: if the project only contains resources
+// the last resources gets loaded twice for some reason
+void load_project(AppState *app) {
+  if (app == NULL) {
+    return;
+  }
+
+  char *path = tinyfd_openFileDialog(
+      "Open Project",
+      NULL,
+      0,
+      NULL,
+      NULL,
+      0);
+
+  if (path == NULL) {
+    nob_log(NOB_WARNING, "NULL file path");
+    return;
+  }
+
+  // TODO: clean me up
+  // the node movement get caothic the instant they are loaded
+  // maybe serializing the positions too would hurt (meh)
+  app->togglePhysics = OFF;
+
+  int size = 2048;
+  char line[size];
+  FILE *projectFile = fopen(path, "r");
+  nob_log(NOB_INFO, "Loading project: %s", path);
+
+  EntityId baseNodeId = NIL;
+  EntityId baseLinkId = NIL;
+  EntityId baseResourceId = NIL;
+  OuiContext *ouiContext = &(app->ouiContext);
+  EntityManager *entityManager = &(app->entityManager);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
+  float offsetX = 1000;
+  float offsetY = 1000;
+  float baseX = -windowWidth / 2 + offsetX;
+  float baseY = -windowHeight / 2 + offsetY;
+
+  while (!feof(projectFile)) {
+    fgets(line, size, projectFile);
+    nob_log(NOB_INFO, "Line: %s", line);
+
+    if (line[0] == 'B') { // BPM
+      long long bpmLL = strtol(line, NULL, 10);
+
+      Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
+      graphInterpreter->BPM = bpmLL;
+    } else if (line[0] == 'R') {
+      EntityId resourceId = create_entity(entityManager);
+      if (baseResourceId == NIL) {
+        baseResourceId = resourceId;
+      }
+
+      Entity *resource = get_entity(entityManager, resourceId);
+
+      resource->type = ENTITY_TYPE_RESOURCE;
+      //      sscanf(line, "R %f %f %f %f %s", &resource->color.r, &resource->color.g, &resource->color.b, &resource->color.a, resource->buffer);
+      sscanf(line, "R %f %f %f %f", &resource->color.r, &resource->color.g, &resource->color.b, &resource->color.a);
+
+      int countSpaces = 0;
+      size_t prefixLength = 0;
+
+      while (countSpaces < 5 && prefixLength < strlen(line)) {
+        countSpaces += line[prefixLength] == ' ';
+        prefixLength++;
+      }
+
+      if (prefixLength < strlen(line)) {
+        snprintf(resource->buffer, BUFFER_SIZE, "%s", line + prefixLength);
+      }
+
+      if (
+          resource->buffer[0] != '\0' &&
+          resource->buffer[strlen(resource->buffer) - 1] == '\n') {
+        // fgets keeps the newline at the end
+        resource->buffer[strlen(resource->buffer) - 1] = '\0';
+      }
+
+      append_child(entityManager, app->resourceManagerId, resourceId);
+      nob_log(NOB_INFO, "Loaded a resource: %d %f %f %f %f %s", resourceId, resource->color.r, resource->color.g, resource->color.b, resource->color.a, resource->buffer);
+    } else if (line[0] == 'N') {
+      EntityId nodeId = create_node(app);
+      if (baseNodeId == NIL) {
+        baseNodeId = nodeId;
+      }
+
+      int isNeedle = NO;
+      EntityId resourceId = NIL;
+      sscanf(line, "N %d %d", &resourceId, &isNeedle);
+
+      if (resourceId != NIL) {
+        entityManager->initialState[nodeId] = resourceId + baseResourceId - 1;
+      }
+
+      if (isNeedle == YES) {
+        entityManager->initNeedles[nodeId] = YES;
+      }
+
+      nob_log(NOB_INFO, "Loaded a node: %d %d %d", nodeId, resourceId, isNeedle);
+    } else if (line[0] == 'L') {
+      EntityId aId, bId, resourceId;
+      sscanf(line, "L %d %d %d", &aId, &bId, &resourceId);
+
+      EntityId linkId = create_link(app, baseNodeId + aId - 1, baseNodeId + bId - 1);
+      if (baseLinkId == NIL) {
+        baseLinkId = linkId;
+      }
+
+      if (resourceId != NIL) {
+        entityManager->initialState[linkId] = resourceId + baseResourceId - 1;
+      }
+      nob_log(NOB_INFO, "Loaded a link: %d %d %d %d", linkId, aId + baseNodeId - 1, bId + baseNodeId - 1, resourceId + baseResourceId - 1);
+    } else if (line[0] == 'A') {
+      if (line[2] == 'N') {
+        EntityId linkId, nodeId, resourceId;
+        sscanf(line, "A N %d %d %d", &linkId, &nodeId, &resourceId);
+        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+
+      } else if (line[2] == 'L') {
+        EntityId linkId, otherLinkId, resourceId;
+        sscanf(line, "A L %d %d %d", &linkId, &otherLinkId, &resourceId);
+        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+      }
+    } else if (line[0] == 'P') {
+      if (line[2] == 'N') {
+        EntityId linkId, nodeId, resourceId;
+        sscanf(line, "P N %d %d %d", &linkId, &nodeId, &resourceId);
+        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+
+      } else if (line[2] == 'L') {
+        EntityId linkId, otherLinkId, resourceId;
+        sscanf(line, "P L %d %d %d", &linkId, &otherLinkId, &resourceId);
+        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+      }
+    }
+
+    baseX += offsetX;
+    if (baseX >= windowWidth / 2 - offsetX) {
+      baseX = -windowWidth / 2 + offsetX;
+      baseY += offsetY;
+    }
+  }
+
+  fclose(projectFile);
+}
+
+int get_count_resources(AppState *app) {
+  if (app == NULL) {
+    return 0;
+  }
+
+  EntityManager *entityManager = &(app->entityManager);
+  Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
+
+  int resourceCount = 0;
+  EntityId resourceId = resourceManager->firstChild;
+  while (resourceId != NIL) {
+    Entity *resource = get_entity(entityManager, resourceId);
+    resourceCount++;
+    resourceId = resource->nextSibling;
+  }
+
+  return resourceCount;
 }
 
 int get_cwd(char *result, size_t bufferSize) {
