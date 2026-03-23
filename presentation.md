@@ -18,6 +18,7 @@ A Program That Edits Its Own Code
 What is a program?
 
 What is a language?
+                      Provide examples
 
 Petri nets and Colored petri nets 
 How is it different?
@@ -27,6 +28,7 @@ digital circuits
 
 Implementation details
                       Oui
+Memory consupmtion
 
                       Testing 
                                             Fuzzy test
@@ -38,6 +40,7 @@ Implementation details
                       Layouts are complicated
 
 Cool Implementation details 
+                      Entity Management
                       Collision detection
                       Spring physics
 
