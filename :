@@ -271,8 +271,6 @@ void heap_sort(EntityManager *entityManager, SortAxis sortAxis);
 // ---------------- Entity Management -----------------
 
 // -------------------- App State ---------------------
-#define MAX_SOUNDS_AT_ONCE 10
-
 typedef enum InputMode {
   INPUT_MODE_NONE,
   INPUT_MODE_ASSERT,
@@ -319,38 +317,7 @@ typedef struct AppState {
 
   EntityId selectedLinkId;
   // used for assert and perform statements
-
-  int used_sound_slots[MAX_SOUNDS_AT_ONCE];
-  ma_sound sound_slots[MAX_SOUNDS_AT_ONCE];
 } AppState;
-
-void miniaudio_play_sound_wrapper(AppState *app, ma_sound *sound) {
-  if (app == NULL) {
-    return;
-  }
-
-  for (int i = 0; i < MAX_SOUNDS_AT_ONCE; i++) {
-    if (
-        app->used_sound_slots[i] == YES &&
-        !ma_sound_at_end(&app->sound_slots[i])) {
-      continue;
-    }
-
-    if (app->used_sound_slots[i] == YES) {
-      ma_sound_uninit(&app->sound_slots[i]);
-    }
-
-    app->used_sound_slots[i] = YES;
-    ma_result result = ma_sound_init_copy(&app->audioEngine, sound, 0, NULL, &app->sound_slots[i]);
-    if (result != MA_SUCCESS) {
-      nob_log(NOB_ERROR, "FAILED TO PLAY SOUND IN WRAPPER");
-    } else {
-      nob_log(NOB_INFO, "DIDNT FAILED");
-    }
-    ma_sound_start(&app->sound_slots[i]);
-    break;
-  }
-}
 
 void clock_tick(Clock *clock);
 
@@ -2100,19 +2067,9 @@ void play_beat(AppState *app) {
         entityManager->currState[i] != NIL &&
         entityManager->currNeedles[i] == YES) {
       Entity *resource = get_entity(entityManager, entityManager->currState[i]);
+      nob_log(NOB_INFO, "Playing: %s", resource->buffer);
       // ma_engine_play_sound(audioEngine, resource->buffer, NULL);
-      /* ma_sound sound;
-       ma_result result;
-
-       result = ma_sound_init_copy(audioEngine, &(resource->sound), 0, NULL, &sound);
-       if (result == MA_SUCCESS) {
-         ma_sound_start(&resource->sound);
-       }*/
-
-      if (strlen(resource->buffer) > 0) {
-        nob_log(NOB_INFO, "Playing: %s", resource->buffer);
-        miniaudio_play_sound_wrapper(app, &resource->sound);
-      }
+      ma_sound_start(&resource->sound);
     }
   }
 }
@@ -3292,6 +3249,13 @@ void load_project(AppState *app) {
 
       if (prefixLength < strlen(line)) {
         snprintf(resource->buffer, BUFFER_SIZE, "%s", line + prefixLength);
+        ma_sound_init_from_file(audioEngine, resource->buffer, MA_SOUND_FLAG_NO_PITCH | MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, NULL, &(resource->sound));
+
+        ma_result result;
+        result = ma_sound_init_from_file(audioEngine, resource->buffer, 0, NULL, NULL, &resource->sound);
+        if (result != MA_SUCCESS) {
+          nob_log(NOB_ERROR, "FAILED TO INITILIZE AUDIO: %s", resource->buffer);
+        }
       }
 
       if (
@@ -3299,12 +3263,6 @@ void load_project(AppState *app) {
           resource->buffer[strlen(resource->buffer) - 1] == '\n') {
         // fgets keeps the newline at the end
         resource->buffer[strlen(resource->buffer) - 1] = '\0';
-
-        ma_result result;
-        result = ma_sound_init_from_file(audioEngine, resource->buffer, 0, NULL, NULL, &resource->sound);
-        if (result != MA_SUCCESS) {
-          nob_log(NOB_ERROR, "FAILED TO INITILIZE AUDIO: %s", resource->buffer);
-        }
       }
 
       append_child(entityManager, app->resourceManagerId, resourceId);
