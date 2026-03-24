@@ -10,10 +10,15 @@ Humans can make mistakes
                       Check everything
 
 A Program That Edits Its Own Code 
-                      As Its Running
+                      As Its Running (not really) 
 
                       Karim Khili
 
+Runaway
+
+tips: 
+                      donts be declartive/rigid
+                      minimize statements
 
 What is a program?
 
