@@ -1003,6 +1003,9 @@ void link_mouse_event_handler(AppState *app) {
     return;
   }
 
+  OuiContext *ouiContext = &(app->ouiContext);
+  NtVec2f mousePos = get_mouse_position(ouiContext);
+
   InputMode mode = app->inputMode;
   EntityId selectedLinkId = app->selectedLinkId;
   EntityManager *entityManager = &(app->entityManager);
@@ -1010,12 +1013,12 @@ void link_mouse_event_handler(AppState *app) {
 
   int state;
   state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
-  // a link listens for one mouse event: click
+  // a link listens for two mouse event: left and right click
 
   if (state == PRESSED) {
     EntityId clickedLinkId = get_clicked_link(app);
 
-    if (mode == INPUT_MODE_INITIALIZE || mode == INPUT_MODE_PLAYING) {
+    if (mode == INPUT_MODE_INITIALIZE) {
       if (brush->firstChild != NIL) {
         set_initial_state(entityManager, clickedLinkId, brush->firstChild);
       } else {
@@ -1025,6 +1028,94 @@ void link_mouse_event_handler(AppState *app) {
       set_assert_state(entityManager, selectedLinkId, clickedLinkId, brush->firstChild);
     } else if (mode == INPUT_MODE_PERFORM) {
       set_perform_state(entityManager, selectedLinkId, clickedLinkId, brush->firstChild);
+    } else if (mode == INPUT_MODE_PLAYING) {
+      if (brush->firstChild != NIL) {
+        entityManager->currState[clickedLinkId] = brush->firstChild;
+      } else {
+        app->selectedLinkId = clickedLinkId;
+      }
+    }
+  } else {
+    state = mouse_button_states[GLFW_MOUSE_BUTTON_RIGHT];
+    if (state == PRESSED) {
+      EntityId clickedLink = NIL;
+
+      for (int i = 1; i < entityManager->count; i++) {
+        Entity *e = get_entity(entityManager, i);
+
+        if (e->type == ENTITY_TYPE_LINK) {
+          float linkHeight = DEFAULT_LINK_THICKNESS;
+
+          Entity *a = get_entity(entityManager, e->edgeA);
+          Entity *b = get_entity(entityManager, e->edgeB);
+
+          int gap = 10;
+          int hasAnEvilTwin = 0;
+          for (int j = 0; j < entityManager->count; j++) {
+            Entity *other = get_entity(entityManager, j);
+
+            if (other->type == ENTITY_TYPE_LINK && e->edgeA == other->edgeB && e->edgeB == other->edgeA) {
+              hasAnEvilTwin = 1;
+            }
+          }
+
+          NtVec2f diff = nwt_sub(a->position, b->position);
+          float distance = nwt_length(diff);
+          NtVec2f normalizedDiff = nwt_normalize(diff);
+
+          NtVec2f orthogonal = {
+              .x = -normalizedDiff.y,
+              .y = normalizedDiff.x};
+          nwt_normalize(orthogonal);
+
+          NtVec2f bOffset = nwt_add(b->position, nwt_mult_s(normalizedDiff, b->radius));
+          float linkLength = distance - a->radius - b->radius;
+
+          NtVec2f mid = nwt_add(bOffset, nwt_mult_s(normalizedDiff, linkLength / 2));
+          mid = nwt_add(mid, nwt_mult_s(orthogonal, gap * hasAnEvilTwin));
+
+          // we transform to a different frame of reference
+          // and we project on it
+          float firstComponent = nwt_dot(nwt_sub(mousePos, mid), normalizedDiff);
+          float secondComponent = nwt_dot(nwt_sub(mousePos, mid), orthogonal);
+
+          if (
+              firstComponent >= -linkLength / 2 &&
+              firstComponent <= linkLength / 2 &&
+              secondComponent >= -linkHeight / 2 &&
+              secondComponent <= linkHeight / 2) {
+            clickedLink = i;
+            break;
+          }
+        }
+      }
+
+      if (clickedLink != NIL) {
+        nob_log(NOB_INFO, "Detected a link right click: %d", clickedLink);
+        mouse_button_states[GLFW_MOUSE_BUTTON_RIGHT] = RELEASED;
+
+        InputMode mode = app->inputMode;
+        if (mode == INPUT_MODE_INITIALIZE) {
+          set_initial_state(
+              entityManager,
+              clickedLink,
+              NIL);
+        } else if (mode == INPUT_MODE_ASSERT) {
+          set_assert_state(
+              entityManager,
+              app->selectedLinkId,
+              clickedLink,
+              NIL);
+        } else if (mode == INPUT_MODE_PERFORM) {
+          set_perform_state(
+              entityManager,
+              app->selectedLinkId,
+              clickedLink,
+              NIL);
+        } else if (mode == INPUT_MODE_PLAYING) {
+          entityManager->currState[clickedLink] = NIL;
+        }
+      }
     }
   }
 }
@@ -1109,6 +1200,8 @@ void set_node_resource_using_brush(AppState *app, EntityId nodeId) {
         selectedLinkId,
         nodeId,
         brush->firstChild);
+  } else if (mode == INPUT_MODE_PLAYING) {
+    entityManager->currState[nodeId] = brush->firstChild;
   }
 }
 
@@ -1222,6 +1315,8 @@ void node_mouse_event_handler(AppState *app) {
               app->selectedLinkId,
               clickedNode,
               NIL);
+        } else if (mode == INPUT_MODE_PLAYING) {
+          entityManager->currState[clickedNode] = NIL;
         }
       }
     }
@@ -1532,6 +1627,86 @@ void apply_forces(AppState *app) {
       b->force = nwt_add(b->force, nwt_mult_s(b->velocity, -damp));
     }
   }
+
+  // TODO: repulsive force when the spring system is too compressed
+  /* for (int i = 1; i < entityManager->count; i++) {
+     Entity *link1 = get_entity(entityManager, i);
+
+     if (link1->type != ENTITY_TYPE_LINK) {
+       continue;
+     }
+
+     for (int j = 1; j < entityManager->count; j++) {
+       Entity *link2 = get_entity(entityManager, j);
+
+       if (link2->type != ENTITY_TYPE_LINK) {
+         continue;
+       }
+
+       // if they have exactly one node in common
+       EntityId aId = NIL, bId1 = NIL, bId2 = NIL;
+
+       if ((link1->edgeA == link2->edgeA && link1->edgeB != link2->edgeB)) {
+         aId = link1->edgeA;
+         bId1 = link1->edgeB;
+         bId2 = link2->edgeB;
+       }
+
+       if ((link1->edgeA == link2->edgeB && link1->edgeB != link2->edgeA)) {
+         aId = link1->edgeA;
+         bId1 = link1->edgeB;
+         bId2 = link2->edgeA;
+       }
+
+       if ((link1->edgeB == link2->edgeA && link1->edgeA != link2->edgeB)) {
+         aId = link1->edgeB;
+         bId1 = link1->edgeA;
+         bId2 = link2->edgeB;
+       }
+
+       if ((link1->edgeB == link2->edgeB && link1->edgeA != link2->edgeA)) {
+         aId = link1->edgeB;
+         bId1 = link1->edgeA;
+         bId2 = link2->edgeA;
+       }
+
+       if (aId == NIL) {
+         continue;
+       }
+
+       // apply a repulsive force orthogonal to the corresponding link
+       Entity *a = get_entity(entityManager, aId);
+       Entity *b1 = get_entity(entityManager, bId1);
+       Entity *b2 = get_entity(entityManager, bId2);
+
+       NtVec2f diff1 = nwt_sub(b1->position, a->position);
+       float distance1 = nwt_length(diff1);
+       NtVec2f normalizedDiff1 = nwt_normalize(diff1);
+
+       NtVec2f orthogonal1 = {
+           .x = -normalizedDiff1.y,
+           .y = normalizedDiff1.x};
+       nwt_normalize(orthogonal1);
+
+       NtVec2f diff2 = nwt_sub(b2->position, a->position);
+       float distance2 = nwt_length(diff2);
+       NtVec2f normalizedDiff2 = nwt_normalize(diff2);
+
+       NtVec2f orthogonal2 = {
+           .x = -normalizedDiff2.y,
+           .y = normalizedDiff2.x};
+       nwt_normalize(orthogonal2);
+
+       NtVec2f diff3 = nwt_sub(b1->position, b2->position);
+       float distance3 = nwt_length(diff3);
+       NtVec2f normalizedDiff3 = nwt_normalize(diff3);
+
+       NtVec2f orthogonal3 = {
+           .x = -normalizedDiff3.y,
+           .y = normalizedDiff3.x};
+       nwt_normalize(orthogonal3);
+     }
+   }*/
 
   for (int i = 0; i < entityManager->countNodes; i++) {
     EntityId id = entityManager->nodeIds[i];
@@ -2729,7 +2904,7 @@ void save_project(AppState *app) {
 
   if (app->graphInterpreterId != NIL) {
     Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
-    fprintf(saveFile, "BPM %f", graphInterpreter->BPM);
+    fprintf(saveFile, "BPM %f\n", graphInterpreter->BPM);
   }
 
   // save resources
@@ -3006,6 +3181,12 @@ void load_project(AppState *app) {
   FILE *projectFile = fopen(path, "r");
   nob_log(NOB_INFO, "Loading project: %s", path);
 
+  OuiContext *ouiContext = &(app->ouiContext);
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
   EntityId baseNodeId = NIL;
   EntityId baseLinkId = NIL;
   EntityId baseResourceId = NIL;
@@ -3070,6 +3251,10 @@ void load_project(AppState *app) {
         baseNodeId = nodeId;
       }
 
+      Entity *node = get_entity(entityManager, nodeId);
+      node->position.x = rand() % (int)(windowWidth - DEFAULT_NODE_RADIUS) - windowWidth / 2;
+      node->position.y = rand() % (int)(windowHeight - DEFAULT_NODE_RADIUS) - windowHeight / 2;
+
       int isNeedle = NO;
       EntityId resourceId = NIL;
       sscanf(line, "N %d %d", &resourceId, &isNeedle);
@@ -3109,7 +3294,7 @@ void load_project(AppState *app) {
       } else if (line[2] == 'L') {
         EntityId linkId, otherLinkId, resourceId;
         sscanf(line, "A L %d %d %d", &linkId, &otherLinkId, &resourceId);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseLinkId - 1] = resourceId + baseResourceId - 1;
       }
 
       countAsserts++;
@@ -3122,7 +3307,7 @@ void load_project(AppState *app) {
       } else if (line[2] == 'L') {
         EntityId linkId, otherLinkId, resourceId;
         sscanf(line, "P L %d %d %d", &linkId, &otherLinkId, &resourceId);
-        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseLinkId - 1] = resourceId + baseResourceId - 1;
       }
 
       countPerforms++;

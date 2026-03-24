@@ -1,0 +1,251 @@
+BPM 180.000000
+R 16.000000 104.000000 219.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano2.mp3
+R 153.000000 193.000000 241.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano1.mp3
+R 165.000000 29.000000 45.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano4.mp3
+R 246.000000 97.000000 81.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano3.mp3
+R 38.000000 162.000000 105.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano6.mp3
+R 143.000000 240.000000 164.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano5-faded-in.mp3
+R 97.000000 53.000000 131.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano8.mp3
+R 220.000000 138.000000 221.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano7.mp3
+R 99.000000 69.000000 44.000000 255.000000 
+R 53.000000 132.000000 228.000000 255.000000 /home/karim/Documents/runaway-soundboard/cleaned-drums/kick1.wav
+R 87.000000 227.000000 137.000000 255.000000 /home/karim/Documents/runaway-soundboard/cleaned-drums/hats1.wav
+R 248.000000 228.000000 92.000000 255.000000 /home/karim/Documents/runaway-soundboard/cleaned-drums/kick2.wav
+R 255.000000 163.000000 72.000000 255.000000 /home/karim/Documents/runaway-soundboard/cleaned-drums/hats2.wav
+R 237.000000 51.000000 59.000000 255.000000 /home/karim/Documents/runaway-soundboard/cleaned-drums/boomboom.wav
+R 192.000000 97.000000 203.000000 255.000000 /home/karim/Documents/runaway-soundboard/effective-bass/bass1.wav
+R 181.000000 131.000000 90.000000 255.000000 /home/karim/Documents/runaway-soundboard/effective-bass/chords.wav
+R 97.000000 53.000000 131.000000 255.000000 /home/karim/Documents/runaway-soundboard/effective-bass/horns.wav
+R 16.000000 104.000000 219.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano2.mp3
+R 153.000000 193.000000 241.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano1.mp3
+R 165.000000 29.000000 45.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano4.mp3
+R 246.000000 97.000000 81.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano3.mp3
+R 38.000000 162.000000 105.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano6.mp3
+R 143.000000 240.000000 164.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano5.mp3
+R 97.000000 53.000000 131.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano8.mp3
+R 237.000000 123.000000 73.000000 255.000000 
+R 220.000000 138.000000 221.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano7.mp3
+N 0 1
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 0 0
+N 17 0
+N 16 0
+N 0 0
+N 15 0
+N 0 0
+N 0 0
+N 10 0
+N 0 0
+N 0 0
+N 11 0
+N 12 0
+N 13 0
+N 0 0
+N 14 0
+N 14 0
+N 11 0
+N 0 0
+N 0 0
+N 12 0
+N 13 0
+N 0 0
+L 41 2 0
+L 2 3 0
+L 3 23 0
+L 1 37 0
+L 41 4 3
+L 4 5 0
+L 5 6 0
+L 6 41 0
+L 7 9 0
+L 41 7 3
+L 9 8 0
+L 8 41 0
+L 41 12 3
+L 12 10 0
+L 10 11 0
+L 11 41 0
+L 13 14 0
+L 15 13 0
+L 16 15 3
+L 14 16 0
+L 17 16 0
+L 16 19 3
+L 19 18 0
+L 18 17 0
+L 16 20 3
+L 20 21 0
+L 21 22 0
+L 22 16 0
+L 23 16 0
+L 16 24 0
+L 24 25 0
+L 27 29 0
+L 29 28 0
+L 28 30 0
+L 30 27 0
+L 27 31 0
+L 31 32 0
+L 32 33 0
+L 33 27 0
+L 27 34 0
+L 34 35 0
+L 35 36 0
+L 36 27 0
+L 43 44 0
+L 44 42 0
+L 42 41 0
+L 37 43 0
+L 27 38 0
+L 38 40 0
+L 40 39 0
+L 39 1 0
+L 25 26 0
+L 26 27 0
+L 45 48 0
+L 48 37 0
+L 37 46 3
+L 46 45 0
+L 37 47 3
+L 47 49 0
+L 49 50 0
+L 50 37 0
+L 51 52 0
+L 52 53 0
+L 53 37 0
+L 37 51 3
+L 54 56 10
+L 56 58 0
+L 54 59 10
+L 59 60 0
+L 54 57 10
+L 57 55 0
+L 62 63 0
+L 63 65 0
+L 65 64 0
+L 64 61 0
+L 61 66 0
+L 66 67 0
+L 67 68 0
+L 68 69 0
+L 69 70 0
+L 70 71 0
+L 71 72 0
+L 72 73 0
+L 73 74 0
+L 74 75 0
+L 75 76 0
+L 76 62 0
+L 54 62 10
+L 27 54 1
+A N 1 41 3
+A L 5 5 1
+A L 10 10 1
+A L 13 13 1
+A L 19 19 1
+A L 22 22 1
+A L 25 25 1
+A N 30 16 5
+A L 32 32 1
+A L 36 36 1
+A L 40 40 1
+A N 47 37 1
+A N 48 27 7
+A L 56 56 1
+A L 58 58 1
+A L 65 65 1
+A L 66 66 10
+A L 68 68 10
+A L 88 88 10
+A N 89 27 7
+A L 89 89 1
+P N 4 37 2
+P L 4 65 1
+P L 5 5 3
+P L 5 10 1
+P L 10 10 3
+P N 12 41 3
+P L 13 5 1
+P L 13 13 3
+P L 19 19 3
+P N 20 16 5
+P L 22 19 1
+P L 22 21 3
+P L 22 22 3
+P L 25 22 1
+P L 25 25 3
+P N 29 16 6
+P L 29 25 1
+P L 32 32 3
+P L 32 36 1
+P L 36 36 3
+P N 39 27 7
+P L 40 32 1
+P L 40 40 3
+P L 46 13 1
+P N 46 41 4
+P N 53 27 8
+P L 53 40 1
+P N 55 37 1
+P L 56 56 3
+P L 58 56 1
+P L 58 58 3
+P L 65 58 1
+P L 65 65 3
+P L 66 66 11
+P L 68 68 11
+P L 70 70 11
+P L 88 88 11
+P L 89 89 3

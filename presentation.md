@@ -19,6 +19,8 @@ What is a program?
 
 What is a language?
                       Provide examples
+the colors are fixed to the nodes 
+that dont flow
 
 Petri nets and Colored petri nets 
 How is it different?
@@ -28,6 +30,7 @@ digital circuits
 
 Implementation details
                       Oui
+what inspired oui
 Memory consupmtion
 the physics stuff
 
