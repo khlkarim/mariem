@@ -34,6 +34,7 @@
 #define DEVICE_FORMAT ma_format_f32
 
 // -------------------- StyleSheet --------------------
+#define BACKGROUND_COLOR ((OuiColor){18.0, 18.0, 18.0, 255})
 #define DEFAULT_OUTLINE_THICKNESS 5
 #define DEFAULT_CHARACTER_WIDTH 25
 #define DEFAULT_FONT_SIZE 1
@@ -101,8 +102,6 @@ static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
 NtVec2f get_mouse_position(OuiContext *ouiContext);
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
-
-int get_cwd(char *result, size_t bufferSize);
 // ------------------ Input Handling ------------------
 
 // ---------------- Entity Management -----------------
@@ -432,6 +431,7 @@ void init(AppState *app) {
       .windowTitle = WINDOW_TITLE,
       .windowWidth = WINDOW_WIDTH,
       .windowHeight = WINDOW_HEIGHT,
+      .backgroundColor = BACKGROUND_COLOR,
   };
 
   oui_context_init(ouiContext, &ouiConfig);
@@ -812,13 +812,9 @@ void resource_manager_mouse_event_handler(AppState *app) {
         nob_log(NOB_INFO, "Clicked resource");
         char *title = "Add sound";
 
-        char cwd[BUFFER_SIZE] = {0};
-        get_cwd(cwd, BUFFER_SIZE);
-        nob_log(NOB_INFO, "cwd: %s", cwd);
-
         char *fileName = tinyfd_openFileDialog(
             title,
-            cwd,
+            ".",
             0,
             NULL,
             NULL,
@@ -2036,7 +2032,7 @@ void create_entities(AppState *app) {
   fpsTextLabel->width = 100;
   fpsTextLabel->height = 100;
   fpsTextLabel->marginTop = 50;
-  fpsTextLabel->marginRight = 15;
+  fpsTextLabel->marginRight = -5;
 
   app->bpmTextLabelId = create_entity(entityManager);
   Entity *bpmTextLabel = get_entity(entityManager, app->bpmTextLabelId);
@@ -2044,7 +2040,7 @@ void create_entities(AppState *app) {
   bpmTextLabel->width = 100;
   bpmTextLabel->height = 100;
   bpmTextLabel->marginBottom = 25;
-  bpmTextLabel->marginRight = 20;
+  bpmTextLabel->marginRight = -5;
 
   app->graphInterpreterId = create_entity(entityManager);
   Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
@@ -2221,15 +2217,11 @@ void draw_label(AppState *app, EntityId id) {
   text.content = e->buffer;
   text.fontColor = DEFAULT_TEXT_COLOR;
 
-  OuiRectangle rectangle = oui_get_text_hitbox(ouiContext, &text);
+  OuiRectangle rectangle = {0};
+  oui_text_to_rectangle(ouiContext, &text, &rectangle);
 
-  if (id == app->bpmTextLabelId) {
-    rectangle.centerPos.y -= 10;
-    rectangle.height += 5;
-  }
-
-  rectangle.width += 50;
-  rectangle.height += 40;
+  rectangle.width += 60;
+  rectangle.height += 55;
   rectangle.borderRadius = 15;
   rectangle.backgroundColor = ACSENT_COLOR;
   oui_draw_rectangle(ouiContext, &rectangle);
@@ -2675,9 +2667,6 @@ void draw_resource_manager(AppState *app) {
     return;
   }
 
-  float fontSize = 0.7;
-  float maxLineWidth = 48;
-
   float resourceGap = 20;
   float resourceHeight = 80;
   float resourcePaddingLeft = 30;
@@ -2715,7 +2704,7 @@ void draw_resource_manager(AppState *app) {
   button.backgroundColor = ACSENT_COLOR;
   oui_draw_rectangle(ouiContext, &button);
 
-  text.fontSize = fontSize;
+  text.fontSize = 0.8;
   text.fontColor = OUI_COLOR_WHITE;
   text.lineHeight = DEFAULT_LINE_HEIGHT;
   text.content = "Add color";
@@ -2737,6 +2726,7 @@ void draw_resource_manager(AppState *app) {
   }
 
   int drew = 0;
+  text.startPos.y += 15;
   while (resourceId != NIL && drew < resourceManager->limit) {
     Entity *resource = get_entity(entityManager, resourceId);
 
@@ -2763,21 +2753,41 @@ void draw_resource_manager(AppState *app) {
     text.startPos.y = baseY - (float)DEFAULT_LINE_HEIGHT / 3.5;
     text.content = resource->buffer;
 
-    while (strlen(text.content) > maxLineWidth) {
+    OuiRectangle hitBox = {0};
+    oui_text_to_rectangle(ouiContext, &text, &hitBox);
+
+    while (text.content[0] != '\0' && hitBox.width > button.width - resourcePaddingLeft - resourcePaddingRight - 2 * resourceGap - 2 * resourceColorBorderRadius) {
       text.content++;
+      oui_text_to_rectangle(ouiContext, &text, &hitBox);
     }
 
+    char dots[3];
+    if (strlen(text.content) > 3 && text.content != resource->buffer) {
+      dots[0] = text.content[0];
+      dots[1] = text.content[1];
+      dots[2] = text.content[2];
+
+      text.content[0] = '.';
+      text.content[1] = '.';
+      text.content[2] = '.';
+    }
     oui_draw_text(ouiContext, &text);
+    if (strlen(text.content) > 3 && text.content != resource->buffer) {
+      text.content[0] = dots[0];
+      text.content[1] = dots[1];
+      text.content[2] = dots[2];
+    }
+
     text.content = NULL;
 
     text.content = "X";
-    text.fontSize /= 1.5;
-    text.startPos.y += 5;
+    text.fontSize = 0.6;
+    text.fontColor = (OuiColor){200.0, 29.0, 45.0, 255.0};
     text.startPos.x = button.centerPos.x + button.width / 2 - resourcePaddingRight;
     oui_draw_text(ouiContext, &text);
-    text.fontSize *= 1.5;
-    text.startPos.y -= 5;
     text.content = NULL;
+    text.fontColor = OUI_COLOR_WHITE;
+    text.fontSize = 0.8;
 
     baseY -= resourceManager->gap + resourceHeight;
     resourceId = resource->nextSibling;
@@ -3645,20 +3655,6 @@ void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action
   (void)window;
   (void)scancode;
   (void)mods;
-}
-
-int get_cwd(char *result, size_t bufferSize) {
-  if (result == NULL) {
-    return 0;
-  }
-
-  char *ptr;
-  ptr = getcwd(result, bufferSize);
-  if (ptr == NULL && errno != ERANGE) {
-    return 0;
-  }
-
-  return 1;
 }
 
 void miniaudio_play_sound_wrapper(AppState *app, ma_sound *sound) {

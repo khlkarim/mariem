@@ -42,13 +42,11 @@ int main(int argc, char **argv) {
         "-lm",
         "-ldl",
         "-lpthread",
-        "-lglfw",
-        "-I/usr/include/freetype2",
-        "-I/usr/include/libpng16",
-        "-lfreetype");
+        "-lglfw");
 
-    if (!nob_cmd_run(&cmd))
+    if (!nob_cmd_run(&cmd)) {
       return 1;
+    }
   } else if (strcmp("gen", argv[1]) == 0) {
     Nob_Cmd cmd = {0};
 
@@ -70,8 +68,9 @@ int main(int argc, char **argv) {
     // link flags: include directory and libraries
     nob_cmd_append(&cmd, "-I" INCLUDE_FOLDER);
 
-    if (!nob_cmd_run(&cmd))
+    if (!nob_cmd_run(&cmd)) {
       return 1;
+    }
   }
 
   return 0;
