@@ -234,7 +234,8 @@ typedef struct EntityManager {
   // if i is a link and j is a entity
   // => performMatrix[i * MAX_ENTITIES + j] = the id of the resource that should be attributed to j after i is triggered
 
-  // draw_link function is slow
+  // draw_link function was slow so i added this
+  // so that it doesnt check if a link has another going in the opposite side on every draw
   int linkage[MAX_ENTITIES * MAX_ENTITIES];
   // if a is a node and b is a node,
   // linkage[a][b] = the number of links between a and b (0, 1, 2)
@@ -271,7 +272,7 @@ void heap_sort(EntityManager *entityManager, SortAxis sortAxis);
 // ---------------- Entity Management -----------------
 
 // -------------------- App State ---------------------
-#define MAX_SOUNDS_AT_ONCE 10
+#define MAX_SOUNDS_AT_ONCE MAX_ENTITIES
 
 typedef enum InputMode {
   INPUT_MODE_NONE,
@@ -324,34 +325,6 @@ typedef struct AppState {
   ma_sound sound_slots[MAX_SOUNDS_AT_ONCE];
 } AppState;
 
-void miniaudio_play_sound_wrapper(AppState *app, ma_sound *sound) {
-  if (app == NULL) {
-    return;
-  }
-
-  for (int i = 0; i < MAX_SOUNDS_AT_ONCE; i++) {
-    if (
-        app->used_sound_slots[i] == YES &&
-        !ma_sound_at_end(&app->sound_slots[i])) {
-      continue;
-    }
-
-    if (app->used_sound_slots[i] == YES) {
-      ma_sound_uninit(&app->sound_slots[i]);
-    }
-
-    app->used_sound_slots[i] = YES;
-    ma_result result = ma_sound_init_copy(&app->audioEngine, sound, 0, NULL, &app->sound_slots[i]);
-    if (result != MA_SUCCESS) {
-      nob_log(NOB_ERROR, "FAILED TO PLAY SOUND IN WRAPPER");
-    } else {
-      nob_log(NOB_INFO, "DIDNT FAILED");
-    }
-    ma_sound_start(&app->sound_slots[i]);
-    break;
-  }
-}
-
 void clock_tick(Clock *clock);
 
 void init(AppState *app);
@@ -400,6 +373,7 @@ void draw_resource_manager(AppState *app);
 
 void load_project(AppState *app);
 void save_project(AppState *app);
+void miniaudio_play_sound_wrapper(AppState *app, ma_sound *sound);
 // -------------------- App State ---------------------
 
 int main(int argc, char **argv) {
@@ -695,7 +669,7 @@ void handle_mouse_click(AppState *app) {
   node_mouse_event_handler(app);
 
   // currently, if you click empty space and then hold the mouse and keep moving it
-  // if you pass it on top an element that listens for a click event it will be triggered
+  // if you pass it on top of an element that listens for a click event it will be triggered
   // because glfw never sent the release event
   //
   // this behavior is usually undesirable so lets just consume the click event
@@ -1667,86 +1641,6 @@ void apply_forces(AppState *app) {
     }
   }
 
-  // TODO: repulsive force when the spring system is too compressed
-  /* for (int i = 1; i < entityManager->count; i++) {
-     Entity *link1 = get_entity(entityManager, i);
-
-     if (link1->type != ENTITY_TYPE_LINK) {
-       continue;
-     }
-
-     for (int j = 1; j < entityManager->count; j++) {
-       Entity *link2 = get_entity(entityManager, j);
-
-       if (link2->type != ENTITY_TYPE_LINK) {
-         continue;
-       }
-
-       // if they have exactly one node in common
-       EntityId aId = NIL, bId1 = NIL, bId2 = NIL;
-
-       if ((link1->edgeA == link2->edgeA && link1->edgeB != link2->edgeB)) {
-         aId = link1->edgeA;
-         bId1 = link1->edgeB;
-         bId2 = link2->edgeB;
-       }
-
-       if ((link1->edgeA == link2->edgeB && link1->edgeB != link2->edgeA)) {
-         aId = link1->edgeA;
-         bId1 = link1->edgeB;
-         bId2 = link2->edgeA;
-       }
-
-       if ((link1->edgeB == link2->edgeA && link1->edgeA != link2->edgeB)) {
-         aId = link1->edgeB;
-         bId1 = link1->edgeA;
-         bId2 = link2->edgeB;
-       }
-
-       if ((link1->edgeB == link2->edgeB && link1->edgeA != link2->edgeA)) {
-         aId = link1->edgeB;
-         bId1 = link1->edgeA;
-         bId2 = link2->edgeA;
-       }
-
-       if (aId == NIL) {
-         continue;
-       }
-
-       // apply a repulsive force orthogonal to the corresponding link
-       Entity *a = get_entity(entityManager, aId);
-       Entity *b1 = get_entity(entityManager, bId1);
-       Entity *b2 = get_entity(entityManager, bId2);
-
-       NtVec2f diff1 = nwt_sub(b1->position, a->position);
-       float distance1 = nwt_length(diff1);
-       NtVec2f normalizedDiff1 = nwt_normalize(diff1);
-
-       NtVec2f orthogonal1 = {
-           .x = -normalizedDiff1.y,
-           .y = normalizedDiff1.x};
-       nwt_normalize(orthogonal1);
-
-       NtVec2f diff2 = nwt_sub(b2->position, a->position);
-       float distance2 = nwt_length(diff2);
-       NtVec2f normalizedDiff2 = nwt_normalize(diff2);
-
-       NtVec2f orthogonal2 = {
-           .x = -normalizedDiff2.y,
-           .y = normalizedDiff2.x};
-       nwt_normalize(orthogonal2);
-
-       NtVec2f diff3 = nwt_sub(b1->position, b2->position);
-       float distance3 = nwt_length(diff3);
-       NtVec2f normalizedDiff3 = nwt_normalize(diff3);
-
-       NtVec2f orthogonal3 = {
-           .x = -normalizedDiff3.y,
-           .y = normalizedDiff3.x};
-       nwt_normalize(orthogonal3);
-     }
-   }*/
-
   for (int i = 0; i < entityManager->countNodes; i++) {
     EntityId id = entityManager->nodeIds[i];
     Entity *e1 = get_entity(entityManager, id);
@@ -2082,7 +1976,6 @@ void play_beat(AppState *app) {
     return;
   }
 
-  ma_engine *audioEngine = &(app->audioEngine);
   EntityManager *entityManager = &(app->entityManager);
   Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
 
@@ -2535,16 +2428,6 @@ void draw_link(AppState *app, EntityId id) {
       .y = normalizedDiff.x};
   nwt_normalize(orthogonal);
 
-  /*int gap = 10;
-  int hasAnEvilTwin = 0;
-  for (int i = 0; i < entityManager->count; i++) {
-    Entity *other = get_entity(entityManager, i);
-
-    if (other->type == ENTITY_TYPE_LINK && e->edgeA == other->edgeB && e->edgeB == other->edgeA) {
-      hasAnEvilTwin = 1;
-    }
-  }*/
-
   int gap = 10;
   int hasAnEvilTwin = entityManager->linkage[e->edgeA * MAX_ENTITIES + e->edgeB] == 2;
 
@@ -2959,6 +2842,12 @@ void save_project(AppState *app) {
   nob_log(NOB_INFO, "Saving to file: %s\n", path);
   FILE *saveFile = fopen(path, "w");
 
+  if (saveFile == NULL) {
+    nob_log(NOB_ERROR, "Failed to open save file: %s", path);
+    return;
+  }
+
+  OuiContext *ouiContext = &(app->ouiContext);
   EntityManager *entityManager = &(app->entityManager);
 
   if (app->graphInterpreterId != NIL) {
@@ -2982,10 +2871,20 @@ void save_project(AppState *app) {
 
   // save the nodes
   int countNodes = 0;
+
+  float windowWidth, windowHeight;
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
+
   for (int i = 1; i < entityManager->count; i++) {
     Entity *e = get_entity(entityManager, i);
 
     if (e->type == ENTITY_TYPE_NODE) {
+      NtVec2f normalizedNodePosition = {
+          .x = e->position.x / (windowWidth / 2.0),
+          .y = e->position.y / (windowHeight / 2.0),
+      };
+
       int foundResource = NO;
       EntityId mappedResourceId = NIL;
 
@@ -3003,8 +2902,8 @@ void save_project(AppState *app) {
       }
 
       mappedResourceId = foundResource == NO ? NIL : mappedResourceId;
-      nob_log(NOB_INFO, "N %d %d", mappedResourceId, entityManager->initNeedles[i]);
-      fprintf(saveFile, "N %d %d\n", mappedResourceId, entityManager->initNeedles[i]);
+      nob_log(NOB_INFO, "N %d %d %f %f", mappedResourceId, entityManager->initNeedles[i], normalizedNodePosition.x, normalizedNodePosition.y);
+      fprintf(saveFile, "N %d %d %f %f\n", mappedResourceId, entityManager->initNeedles[i], normalizedNodePosition.x, normalizedNodePosition.y);
 
       countNodes++;
     }
@@ -3240,6 +3139,11 @@ void load_project(AppState *app) {
   FILE *projectFile = fopen(path, "r");
   nob_log(NOB_INFO, "Loading project: %s", path);
 
+  if (projectFile == NULL) {
+    nob_log(NOB_ERROR, "Failed to open save file: %s", path);
+    return;
+  }
+
   OuiContext *ouiContext = &(app->ouiContext);
 
   float windowWidth, windowHeight;
@@ -3318,8 +3222,23 @@ void load_project(AppState *app) {
       }
 
       Entity *node = get_entity(entityManager, nodeId);
-      node->position.x = rand() % (int)(windowWidth - DEFAULT_NODE_RADIUS) - windowWidth / 2;
-      node->position.y = rand() % (int)(windowHeight - DEFAULT_NODE_RADIUS) - windowHeight / 2;
+
+      int countSpaces = 0;
+      size_t prefixLength = 0;
+
+      while (countSpaces < 3 && prefixLength < strlen(line)) {
+        countSpaces += line[prefixLength] == ' ';
+        prefixLength++;
+      }
+
+      if (prefixLength < strlen(line)) {
+        sscanf(line + prefixLength, "%f %f", &node->position.x, &node->position.y);
+        node->position.x *= windowWidth / 2;
+        node->position.y *= windowHeight / 2;
+      } else {
+        node->position.x = rand() % (int)(windowWidth - DEFAULT_NODE_RADIUS) - windowWidth / 2;
+        node->position.y = rand() % (int)(windowHeight - DEFAULT_NODE_RADIUS) - windowHeight / 2;
+      }
 
       int isNeedle = NO;
       EntityId resourceId = NIL;
@@ -3740,4 +3659,40 @@ int get_cwd(char *result, size_t bufferSize) {
   }
 
   return 1;
+}
+
+void miniaudio_play_sound_wrapper(AppState *app, ma_sound *sound) {
+  if (app == NULL) {
+    return;
+  }
+
+  for (int i = 0; i < MAX_SOUNDS_AT_ONCE; i++) {
+    if (
+        app->used_sound_slots[i] == YES &&
+        !ma_sound_at_end(&app->sound_slots[i])) {
+      continue;
+    }
+
+    if (app->used_sound_slots[i] == YES) {
+      ma_sound_uninit(&app->sound_slots[i]);
+    }
+
+    app->used_sound_slots[i] = YES;
+    ma_result result = ma_sound_init_copy(
+        &app->audioEngine,
+        sound,
+        0,
+        NULL,
+        &app->sound_slots[i]);
+
+    if (result != MA_SUCCESS) {
+      nob_log(NOB_ERROR, "Failed to initialize sound");
+      return;
+    }
+
+    ma_sound_start(&app->sound_slots[i]);
+    return;
+  }
+
+  nob_log(NOB_ERROR, "Sound wasn't played, sound slots are full");
 }

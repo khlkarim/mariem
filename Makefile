@@ -13,12 +13,6 @@ all: main
 main: build
 	$(CC) $(COMMON_CFLAGS) -o build/main src/main.c src/tinyfiledialogs.c $(COMMON_SOURCES) $(COMMON_INCLUDES) $(COMMON_LIBS) $(GLFW) $(FREETYPE)
 
-test-miniaudio: build
-	$(CC) $(COMMON_CFLAGS) -o build/test-miniaudio src/test-miniaudio.c $(COMMON_INCLUDES) $(COMMON_LIBS)
-
-test-tinyfiledialogs:
-	$(CC) $(COMMON_CFLAGS) -o build/test-tinyfiledialogs src/hello.c src/tinyfiledialogs.c $(COMMON_INCLUDES)
-
 gen: build
 	$(CC) $(COMMON_CFLAGS) -o build/gen src/gen.c $(COMMON_INCLUDES) -D_DEFAULT_SOURCE
 
