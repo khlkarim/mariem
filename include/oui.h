@@ -1,16 +1,17 @@
 #if !defined(OUI_HEADER)
 #define OUI_HEADER
 
+#define OUI_DEFAULT_WINDOW_WIDTH 800
+#define OUI_DEFAULT_WINDOW_HEIGHT 600
+#define OUI_DEFAULT_BASE_FONT_SIZE 48.0
+#define OUI_DEFAULT_FONT "fonts/arial.ttf"
+#define OUI_DEFAULT_WINDOW_TITLE "Default window title"
+
 #define OUI_COLOR_BLACK ((OuiColor){0.0, 0.0, 0.0, 255.0})
 #define OUI_COLOR_RED ((OuiColor){255.0, 0.0, 0.0, 255.0})
 #define OUI_COLOR_GREEN ((OuiColor){0.0, 255.0, 0.0, 255.0})
 #define OUI_COLOR_BLUE ((OuiColor){0.0, 0.0, 255.0, 255.0})
 #define OUI_COLOR_WHITE ((OuiColor){255.0, 255.0, 255.0, 255.0})
-
-#define OUI_DEFAULT_FONT "fonts/arial.ttf"
-#define OUI_DEFAULT_WINDOW_TITLE "Hi"
-#define OUI_DEFAULT_WINDOW_WIDTH 800
-#define OUI_DEFAULT_WINDOW_HEIGHT 600
 
 typedef struct OuiVec2i {
   int x;
@@ -40,36 +41,48 @@ typedef struct OuiVertex {
   OuiColor color;
 } OuiVertex;
 
+typedef struct OuiText {
+  OuiVec2f startPos;
+
+  float fontSize;
+  OuiColor fontColor;
+
+  float lineHeight;
+  float maxLineWidth;
+
+  char *content;
+} OuiText;
+
 typedef struct OuiRectangle {
   float width;
   float height;
   float rotationXY;
   OuiVec2f centerPos;
-
   float borderRadius;
+
   float borderResolution;
+  // this attribute is no longer used in the current implementation
+  // but dont remove it, unless you wanna spend an hour debugging a blackscreen
+  //  TODO: deprecate this
 
   OuiColor backgroundColor;
 } OuiRectangle;
 
-typedef struct OuiText {
-  float fontSize;
-  float lineHeight;
-  float maxLineWidth;
-  OuiVec2f startPos;
-  float rotationXY;
-
-  char *content;
-  OuiColor fontColor;
-} OuiText;
-
 typedef struct OuiContext OuiContext;
 
 typedef struct OuiConfig {
-  char *font; // path to a .ttf file
+  char *font;
+  // path to a .ttf file
+
+  float baseFontSize;
+  // this is the base pixel height the font bitmaps get loaded as
+  // setting the fontSize attribute of the OuiText struct
+  // sets the height of the letters to: baseFontSize * text.fontSize
+
   int windowWidth;
   int windowHeight;
   char *windowTitle;
+  OuiColor backgroundColor;
 } OuiConfig;
 
 void oui_context_init(OuiContext *ouiContext, OuiConfig *ouiConfig);
@@ -80,53 +93,58 @@ void oui_begin_frame(OuiContext *ouiContext);
 void oui_end_frame(OuiContext *ouiContext);
 
 void oui_draw_text(OuiContext *ouiContext, OuiText *text);
-OuiRectangle oui_get_text_hitbox(OuiContext *ouiContext, OuiText *text);
 void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle);
 
-OuiVec2i oui_get_window_size(OuiContext *ouiContext);
+void oui_text_to_rectangle(OuiContext *ouiContext, OuiText *text, OuiRectangle *rectangle);
+// Sets the width, height and centerPos attributes of rectangle in such a way that
+// it would span the space occupied by the text when its drawn, and can serve as a background for it
+
+void oui_rectangle_to_text(OuiContext *ouiContext, OuiRectangle *rectangle, OuiText *text);
+// Sets the startPos and maxLineWidth attributes of text in such a way that
+// it would be displayed inside the rectangle when its drawn
+
 int oui_get_window_width(OuiContext *ouiContext);
 int oui_get_window_height(OuiContext *ouiContext);
 
 #endif // OUI_HEADER
 
-#if defined(OUI_USE_GLFW) && !defined(OUI_USED)
-#define OUI_USED
+#if defined(OUI_USE_GLFW) && !defined(OUI_USE_)
+#define OUI_USE_
 
-#define MAX_RECTANGLES 10000
-#define MAX_CERCLES 4 * MAX_RECTANGLES
+#include "stb_truetype.h"
 
+#define MAX_CHARACTERS 128
 typedef struct GLFWwindow GLFWwindow;
 
-typedef struct FontCharacter {
-  OuiVec2i Size;
-  OuiVec2i Bearing;
-  unsigned int Advance;
-  unsigned int TextureID;
-} FontCharacter;
+typedef enum OuiStatus {
+  OUI_STATUS_FAILURE,
+  OUI_STATUS_SUCCESS,
+} OuiStatus;
 
 struct OuiContext {
+  OuiStatus initStatus;
+
   GLFWwindow *window;
+  OuiColor backgroundColor;
 
-  int numCharacters;
-  FontCharacter *fontCharacters;
-
-  unsigned int rectangleInstanceVBO;
-  unsigned int rectangleShaderProgram;
-  unsigned int rectangleVAO, rectangleVBO;
+  unsigned int textVAO, textVBO;
+  unsigned int textShaderProgram;
 
   unsigned int cercleInstanceVBO;
   unsigned int cercleShaderProgram;
   unsigned int cercleVAO, cercleVBO;
 
-  unsigned int textShaderProgram;
-  unsigned int textVAO, textVBO;
+  unsigned int rectangleInstanceVBO;
+  unsigned int rectangleShaderProgram;
+  unsigned int rectangleVAO, rectangleVBO;
 
-  // TODO: would it be more effitient to store less data (introduce a minimal struct)?
-  int countRectangles;
-  OuiRectangle scheduledRectangles[MAX_RECTANGLES];
+  float baseFontSize;
+  int characterCount;
+  int firstCharacterCodePoint;
 
-  int countCerlces;
-  OuiRectangle scheduledCercles[MAX_CERCLES];
+  unsigned int fontTexture;
+  stbtt_aligned_quad alignedQuads[MAX_CHARACTERS];
+  stbtt_packedchar packedCharacters[MAX_CHARACTERS];
 };
 
 #endif // OUI_USE_GLFW
@@ -137,23 +155,24 @@ struct OuiContext {
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include "glad/glad.h"
 #include <GLFW/glfw3.h>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
 
 //----------------------------------------
 // Utils
 //----------------------------------------
 
 #define OUI_PI 3.14159265359
+#define OUI_UNUSED(value) (void)(value)
 
-float oui_min(float a, float b) { return a < b ? a : b; }
-float oui_max(float a, float b) { return a > b ? a : b; }
-void framebuffer_size_callback(GLFWwindow *window, int width, int height);
+float oui_min(float a, float b) { return a <= b ? a : b; }
+float oui_max(float a, float b) { return a >= b ? a : b; }
+float oui_clamp(float x, float min, float max) { return oui_max(min, oui_min(max, x)); }
+void oui_framebuffer_size_callback(GLFWwindow *window, int width, int height);
 
 #define OUI_UNIT_RECTANGLE_VERTEX_COUNT 4
 #define OUI_UNIT_CERCLE_SEGMENT_COUNT 50
@@ -161,10 +180,10 @@ void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 #define OUI_UNIT_CERCLE_VERTEX_COUNT OUI_UNIT_CERCLE_SEGMENT_COUNT + 1
 
 static const OuiVertex OUI_UNIT_RECTANGLE_VERTICES[] = {
-    {{-0.5, 0.5, 0.0}, {0}},
-    {{0.5, -0.5, 0.0}, {0}},
-    {{-0.5, -0.5, 0.0}, {0}},
-    {{0.5, 0.5, 0.0}, {0}},
+    {{-0.5, 0.5, 0.0}, {0, 0, 0, 0}},
+    {{0.5, -0.5, 0.0}, {0, 0, 0, 0}},
+    {{-0.5, -0.5, 0.0}, {0, 0, 0, 0}},
+    {{0.5, 0.5, 0.0}, {0, 0, 0, 0}},
 };
 
 static const OuiVertex OUI_UNIT_RECTANGLE[] = {
@@ -206,19 +225,27 @@ static void oui__initialize_gpu_objects(OuiContext *ouiContext, OuiConfig *ouiCo
 // OuiContext
 //----------------------------------------
 
-void framebuffer_size_callback(GLFWwindow *window, int width, int height) {
+void oui_framebuffer_size_callback(GLFWwindow *window, int width, int height) {
   glViewport(0, 0, width, height);
+  OUI_UNUSED(window);
 }
 
 void oui_context_init(OuiContext *ouiContext, OuiConfig *ouiConfig) {
+  if (ouiContext == NULL) {
+    return;
+  }
+
   if (!glfwInit()) {
+    ouiContext->initStatus = OUI_STATUS_FAILURE;
     printf("Failed to initialize GLFW\n");
     return;
   }
 
+  ouiContext->initStatus = OUI_STATUS_SUCCESS;
   oui__glfw_create_window(ouiContext, ouiConfig);
   oui__freetype_load_font(ouiContext, ouiConfig);
   oui__initialize_gpu_objects(ouiContext, ouiConfig);
+  ouiContext->backgroundColor = ouiConfig->backgroundColor;
 }
 
 static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig) {
@@ -230,10 +257,14 @@ static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig
   int windowHeight = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_HEIGHT : ouiConfig->windowHeight;
   char *windowTitle = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_TITLE : ouiConfig->windowTitle;
 
-  glfwWindowHint(GLFW_SAMPLES, 4); // anti-aliasing
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  glfwWindowHint(GLFW_SAMPLES, 4); // anti-aliasing
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+#ifdef __APPLE__
+  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
 
   GLFWwindow *window = glfwCreateWindow(
       windowWidth,
@@ -243,6 +274,7 @@ static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig
       NULL);
 
   if (!window) {
+    ouiContext->initStatus = OUI_STATUS_FAILURE;
     printf("Failed to create GLFW window\n");
     glfwTerminate();
     return;
@@ -250,74 +282,89 @@ static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig
 
   ouiContext->window = window;
   glfwMakeContextCurrent(ouiContext->window);
-  glfwSetFramebufferSizeCallback(ouiContext->window, framebuffer_size_callback);
+  glfwSetFramebufferSizeCallback(ouiContext->window, oui_framebuffer_size_callback);
   gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 }
 
 static void oui__freetype_load_font(OuiContext *ouiContext, OuiConfig *ouiConfig) {
-  if (ouiContext == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return;
   }
 
+  ouiContext->characterCount = 95;
+  ouiContext->firstCharacterCodePoint = 32;
+  ouiContext->baseFontSize = ouiConfig == NULL || ouiConfig->baseFontSize == 0 ? OUI_DEFAULT_BASE_FONT_SIZE : ouiConfig->baseFontSize;
   char *font = ouiConfig == NULL || ouiConfig->font == NULL ? OUI_DEFAULT_FONT : ouiConfig->font;
 
-  // TODO: try to get rid of this alloc
-  ouiContext->numCharacters = 128;
-  ouiContext->fontCharacters = (FontCharacter *)calloc(ouiContext->numCharacters, sizeof(FontCharacter));
+  float bitmapWidth = 512;
+  float bitmapHeight = 512;
+  size_t bufferSize = 1 << 20;
+  size_t bitmapSize = 512 * 512;
+  float pixelHeight = ouiContext->baseFontSize;
 
-  FT_Library ft;
-  if (FT_Init_FreeType(&ft)) {
-    printf("Could not init FreeType Library\n");
-    return;
+  unsigned char tempBitmap[bitmapSize];
+  unsigned char rawFileBytes[bufferSize];
+
+  FILE *fontFile = fopen(font, "rb");
+  fread(rawFileBytes, 1, bufferSize, fontFile);
+
+  stbtt_fontinfo fontInfo = {0};
+  if (!stbtt_InitFont(&fontInfo, rawFileBytes, 0)) {
+    printf("stbtt_InitFont() Failed!\n");
   }
 
-  FT_Face face;
-  if (FT_New_Face(ft, font, 0, &face)) {
-    printf("Failed to load font: %s\n", font);
-    return;
+  stbtt_pack_context ctx;
+
+  stbtt_PackBegin(
+      &ctx,
+      tempBitmap,
+      bitmapWidth,
+      bitmapHeight,
+      0,
+      1, NULL);
+
+  stbtt_PackFontRange(
+      &ctx,
+      rawFileBytes,
+      0,
+      pixelHeight,
+      32,
+      95,
+      ouiContext->packedCharacters);
+
+  stbtt_PackEnd(&ctx);
+
+  for (int i = 0; i < 96; i++) {
+    float unusedX, unusedY;
+
+    stbtt_GetPackedQuad(
+        ouiContext->packedCharacters,
+        bitmapWidth,
+        bitmapHeight,
+        i,
+        &unusedX, &unusedY,
+        &ouiContext->alignedQuads[i],
+        1);
   }
 
-  FT_Set_Pixel_Sizes(face, 0, 48);
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
+  glGenTextures(1, &(ouiContext->fontTexture));
+  glBindTexture(GL_TEXTURE_2D, ouiContext->fontTexture);
 
-  for (unsigned char c = 0; c < ouiContext->numCharacters; c++) {
-    // load character glyph
-    if (FT_Load_Char(face, c, FT_LOAD_RENDER)) {
-      printf("Failed to load Glyph: %d\n", c);
-      continue;
-    }
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, bitmapWidth,
+               bitmapHeight, 0, GL_RED, GL_UNSIGNED_BYTE, tempBitmap);
 
-    // generate texture
-    unsigned int texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, face->glyph->bitmap.width,
-                 face->glyph->bitmap.rows, 0, GL_RED, GL_UNSIGNED_BYTE,
-                 face->glyph->bitmap.buffer);
-
-    // set texture options
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    // now store character for later use
-    FontCharacter character = {
-        .TextureID = texture,
-        .Size = {face->glyph->bitmap.width, face->glyph->bitmap.rows},
-        .Bearing = {face->glyph->bitmap_left, face->glyph->bitmap_top},
-        .Advance = face->glyph->advance.x,
-    };
-
-    ouiContext->fontCharacters[c] = character;
-  }
-
-  FT_Done_Face(face);
-  FT_Done_FreeType(ft);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 
 static void oui__initialize_gpu_objects(OuiContext *ouiContext, OuiConfig *ouiConfig) {
-  if (ouiContext == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return;
   }
 
@@ -348,7 +395,7 @@ static void oui__initialize_gpu_objects(OuiContext *ouiContext, OuiConfig *ouiCo
   // per-instance data buffer
   glGenBuffers(1, &(ouiContext->rectangleInstanceVBO));
   glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
-  glBufferData(GL_ARRAY_BUFFER, MAX_RECTANGLES * sizeof(OuiRectangle), NULL, GL_DYNAMIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(OuiRectangle), NULL, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   glGenVertexArrays(1, &(ouiContext->rectangleVAO));
@@ -401,7 +448,7 @@ static void oui__initialize_gpu_objects(OuiContext *ouiContext, OuiConfig *ouiCo
   // per-instance data buffer
   glGenBuffers(1, &(ouiContext->cercleInstanceVBO));
   glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
-  glBufferData(GL_ARRAY_BUFFER, MAX_CERCLES * sizeof(OuiRectangle), NULL, GL_DYNAMIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(OuiRectangle), NULL, GL_DYNAMIC_DRAW);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
   glGenVertexArrays(1, &(ouiContext->cercleVAO));
@@ -441,10 +488,15 @@ static void oui__initialize_gpu_objects(OuiContext *ouiContext, OuiConfig *ouiCo
 
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   // --------------------- Cercle ----------------------
+
+  OUI_UNUSED(ouiConfig);
 }
 
 void oui_context_destroy(OuiContext *ouiContext) {
-  if (ouiContext == NULL || ouiContext->window == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->window == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return;
   }
 
@@ -467,7 +519,9 @@ void oui_context_destroy(OuiContext *ouiContext) {
 }
 
 int oui_has_next_frame(OuiContext *ouiContext) {
-  if (ouiContext == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return 0;
   }
 
@@ -475,90 +529,35 @@ int oui_has_next_frame(OuiContext *ouiContext) {
 }
 
 void oui_begin_frame(OuiContext *ouiContext) {
-  // light blue : glClearColor(0.39f, 0.58f, 0.93f, 1.0f);
-  float grey = 18;
-  glClearColor(grey / 256, grey / 256, grey / 256, 1.0f);
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
+    return;
+  }
+
+  float r = oui_clamp(ouiContext->backgroundColor.r, 0, 255) / 255.0;
+  float g = oui_clamp(ouiContext->backgroundColor.g, 0, 255) / 255.0;
+  float b = oui_clamp(ouiContext->backgroundColor.b, 0, 255) / 255.0;
+
+  glClearColor(r, g, b, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void oui_end_frame(OuiContext *ouiContext) {
-  if (ouiContext == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return;
   }
 
   glfwSwapBuffers(ouiContext->window);
   glfwPollEvents();
-  return;
-
-  OuiVec2f windowSize = {
-      .x = oui_get_window_width(ouiContext),
-      .y = oui_get_window_height(ouiContext),
-  };
-
-  // draw the scheduled rectangles
-  unsigned int
-      shader = ouiContext->rectangleShaderProgram,
-      rectangleVAO = ouiContext->rectangleVAO;
-
-  glUseProgram(shader);
-  glUniform2f(
-      glGetUniformLocation(shader, "uWindowSize"),
-      windowSize.x, windowSize.y);
-
-  glBindVertexArray(rectangleVAO);
-  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
-  glBufferSubData(
-      GL_ARRAY_BUFFER,
-      0, ouiContext->countRectangles * sizeof(OuiRectangle),
-      &(ouiContext->scheduledRectangles[0]));
-
-  glDrawArraysInstanced(
-      GL_TRIANGLES,
-      0, 6,
-      ouiContext->countRectangles);
-
-  glBindVertexArray(0);
-  ouiContext->countRectangles = 0;
-
-  // draw the scheduled cercles
-  unsigned int
-      cercleShader = ouiContext->cercleShaderProgram,
-      cercleVAO = ouiContext->cercleVAO;
-
-  glUseProgram(cercleShader);
-  glUniform2f(
-      glGetUniformLocation(cercleShader, "uWindowSize"),
-      windowSize.x, windowSize.y);
-
-  glBindVertexArray(cercleVAO);
-  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
-  glBufferSubData(
-      GL_ARRAY_BUFFER,
-      0, ouiContext->countCerlces * sizeof(OuiRectangle),
-      &(ouiContext->scheduledCercles[0]));
-
-  glDrawArraysInstanced(GL_TRIANGLES, 0, OUI_UNIT_CERCLE_INDEX_COUNT, ouiContext->countCerlces);
-
-  glBindVertexArray(0);
-  ouiContext->countCerlces = 0;
-
-  glfwSwapBuffers(ouiContext->window);
-  glfwPollEvents();
-}
-
-OuiVec2i oui_get_window_size(OuiContext *ouiContext) {
-  OuiVec2i size = {0};
-
-  if (ouiContext == NULL) {
-    return size;
-  }
-
-  glfwGetFramebufferSize(ouiContext->window, &(size.x), &(size.y));
-  return size;
 }
 
 int oui_get_window_width(OuiContext *ouiContext) {
-  if (ouiContext == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return 0;
   }
 
@@ -568,71 +567,15 @@ int oui_get_window_width(OuiContext *ouiContext) {
 }
 
 int oui_get_window_height(OuiContext *ouiContext) {
-  if (ouiContext == NULL) {
+  if (
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return 0;
   }
 
   int screenWidth = 0, screenHeight = 0;
   glfwGetFramebufferSize(ouiContext->window, &screenWidth, &screenHeight);
   return screenHeight;
-}
-
-void oui_flush_draw_calls(OuiContext *ouiContext) {
-  if (ouiContext == NULL) {
-    return;
-  }
-
-  OuiVec2f windowSize = {
-      .x = oui_get_window_width(ouiContext),
-      .y = oui_get_window_height(ouiContext),
-  };
-
-  // draw the scheduled rectangles
-  unsigned int
-      shader = ouiContext->rectangleShaderProgram,
-      rectangleVAO = ouiContext->rectangleVAO;
-
-  glUseProgram(shader);
-  glUniform2f(
-      glGetUniformLocation(shader, "uWindowSize"),
-      windowSize.x, windowSize.y);
-
-  glBindVertexArray(rectangleVAO);
-  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
-  glBufferSubData(
-      GL_ARRAY_BUFFER,
-      0, ouiContext->countRectangles * sizeof(OuiRectangle),
-      &(ouiContext->scheduledRectangles[0]));
-
-  glDrawArraysInstanced(
-      GL_TRIANGLES,
-      0, 6,
-      ouiContext->countRectangles);
-
-  glBindVertexArray(0);
-  ouiContext->countRectangles = 0;
-
-  // draw the scheduled cercles
-  unsigned int
-      cercleShader = ouiContext->cercleShaderProgram,
-      cercleVAO = ouiContext->cercleVAO;
-
-  glUseProgram(cercleShader);
-  glUniform2f(
-      glGetUniformLocation(cercleShader, "uWindowSize"),
-      windowSize.x, windowSize.y);
-
-  glBindVertexArray(cercleVAO);
-  glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
-  glBufferSubData(
-      GL_ARRAY_BUFFER,
-      0, ouiContext->countCerlces * sizeof(OuiRectangle),
-      &(ouiContext->scheduledCercles[0]));
-
-  glDrawArraysInstanced(GL_TRIANGLES, 0, OUI_UNIT_CERCLE_INDEX_COUNT, ouiContext->countCerlces);
-
-  glBindVertexArray(0);
-  ouiContext->countCerlces = 0;
 }
 
 //----------------------------------------
@@ -644,7 +587,10 @@ void oui_flush_draw_calls(OuiContext *ouiContext) {
 //----------------------------------------
 
 void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
-  if (ouiContext == NULL || rectangle == NULL) {
+  if (
+      rectangle == NULL ||
+      ouiContext == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return;
   }
 
@@ -661,21 +607,30 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
       cercleVAO = ouiContext->cercleVAO;
 
   int isRounded = rectangle->borderRadius > 0;
-
   float maxBorderRadius = oui_min(rectangle->width / 2.0, rectangle->height / 2.0);
-  rectangle->borderRadius = oui_min(rectangle->borderRadius, maxBorderRadius);
+  rectangle->borderRadius = oui_clamp(rectangle->borderRadius, 0.0, maxBorderRadius);
+
+  float r, g, b, a;
+  r = rectangle->backgroundColor.r;
+  g = rectangle->backgroundColor.g;
+  b = rectangle->backgroundColor.b;
+  a = rectangle->backgroundColor.a;
+
+  rectangle->backgroundColor.r = oui_clamp(rectangle->backgroundColor.r, 0.0, 255.0) / 255.0;
+  rectangle->backgroundColor.g = oui_clamp(rectangle->backgroundColor.g, 0.0, 255.0) / 255.0;
+  rectangle->backgroundColor.b = oui_clamp(rectangle->backgroundColor.b, 0.0, 255.0) / 255.0;
+  rectangle->backgroundColor.a = oui_clamp(rectangle->backgroundColor.a, 0.0, 255.0) / 255.0;
 
   if (!isRounded) {
-    if (ouiContext->countRectangles >= MAX_RECTANGLES) {
-      return;
-    }
     glUseProgram(rectangleShader);
+
     glUniform2f(
         glGetUniformLocation(rectangleShader, "uWindowSize"),
         windowWidth, windowHeight);
 
     glBindVertexArray(rectangleVAO);
     glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
+
     glBufferSubData(
         GL_ARRAY_BUFFER,
         0, sizeof(OuiRectangle),
@@ -686,14 +641,19 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
         0, 6);
 
     glBindVertexArray(0);
+
+    rectangle->backgroundColor.r = r;
+    rectangle->backgroundColor.g = g;
+    rectangle->backgroundColor.b = b;
+    rectangle->backgroundColor.a = a;
     return;
   }
 
-  // its so rounded it becomes a cercle
   if (
       isRounded &&
-      rectangle->borderRadius == maxBorderRadius &&
-      rectangle->width == rectangle->height) {
+      rectangle->width == rectangle->height &&
+      rectangle->borderRadius == maxBorderRadius) {
+
     glUseProgram(cercleShader);
     glUniform2f(
         glGetUniformLocation(cercleShader, "uWindowSize"),
@@ -701,6 +661,7 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
 
     glBindVertexArray(cercleVAO);
     glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
+
     glBufferSubData(
         GL_ARRAY_BUFFER,
         0, sizeof(OuiRectangle),
@@ -712,14 +673,11 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
         OUI_UNIT_CERCLE_INDEX_COUNT);
 
     glBindVertexArray(0);
-    return;
-  }
 
-  // draw rounded rectangle: 2 sharp rectangles and 4 cercles
-  if (ouiContext->countRectangles > MAX_RECTANGLES - 2) {
-    return;
-  }
-  if (ouiContext->countCerlces > MAX_CERCLES - 4) {
+    rectangle->backgroundColor.r = r;
+    rectangle->backgroundColor.g = g;
+    rectangle->backgroundColor.b = b;
+    rectangle->backgroundColor.a = a;
     return;
   }
 
@@ -735,6 +693,7 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
 
   glBindVertexArray(rectangleVAO);
   glBindBuffer(GL_ARRAY_BUFFER, ouiContext->rectangleInstanceVBO);
+
   glBufferSubData(
       GL_ARRAY_BUFFER,
       0, sizeof(OuiRectangle),
@@ -763,19 +722,19 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
   glBindVertexArray(cercleVAO);
   glBindBuffer(GL_ARRAY_BUFFER, ouiContext->cercleInstanceVBO);
   for (int i = 0; i < OUI_UNIT_RECTANGLE_VERTEX_COUNT; i++) {
-    OuiRectangle slot = {0};
-    slot = *rectangle;
+    OuiRectangle cercle = {0};
+    cercle = *rectangle;
 
     float x = (rectangle->width - 2 * rectangle->borderRadius) * OUI_UNIT_RECTANGLE_VERTICES[i].position.x;
     float y = (rectangle->height - 2 * rectangle->borderRadius) * OUI_UNIT_RECTANGLE_VERTICES[i].position.y;
 
-    slot.centerPos.x = x * cos(rectangle->rotationXY) - y * sin(rectangle->rotationXY) + rectangle->centerPos.x;
-    slot.centerPos.y = x * sin(rectangle->rotationXY) + y * cos(rectangle->rotationXY) + rectangle->centerPos.y;
+    cercle.centerPos.x = x * cos(rectangle->rotationXY) - y * sin(rectangle->rotationXY) + rectangle->centerPos.x;
+    cercle.centerPos.y = x * sin(rectangle->rotationXY) + y * cos(rectangle->rotationXY) + rectangle->centerPos.y;
 
     glBufferSubData(
         GL_ARRAY_BUFFER,
         0, sizeof(OuiRectangle),
-        &slot);
+        &cercle);
 
     glDrawArrays(
         GL_TRIANGLES,
@@ -783,6 +742,11 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
         OUI_UNIT_CERCLE_INDEX_COUNT);
   }
   glBindVertexArray(0);
+
+  rectangle->backgroundColor.r = r;
+  rectangle->backgroundColor.g = g;
+  rectangle->backgroundColor.b = b;
+  rectangle->backgroundColor.a = a;
 }
 
 //----------------------------------------
@@ -795,14 +759,17 @@ void oui_draw_rectangle(OuiContext *ouiContext, OuiRectangle *rectangle) {
 
 void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
   if (
+      text == NULL ||
       ouiContext == NULL ||
-      ouiContext->fontCharacters == NULL ||
-      text == NULL || text->content == NULL) {
+      text->content == NULL ||
+      ouiContext->characterCount == 0 ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
     return;
   }
 
   int windowWidth, windowHeight;
-  glfwGetWindowSize(ouiContext->window, &windowWidth, &windowHeight);
+  windowWidth = oui_get_window_width(ouiContext);
+  windowHeight = oui_get_window_height(ouiContext);
 
   if (windowWidth == 0 || windowHeight == 0) {
     return;
@@ -814,68 +781,94 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
       VAO = ouiContext->textVAO,
       VBO = ouiContext->textVBO;
 
+  float r = oui_clamp(text->fontColor.r, 0.0, 255.0) / 255.0;
+  float g = oui_clamp(text->fontColor.g, 0.0, 255.0) / 255.0;
+  float b = oui_clamp(text->fontColor.b, 0.0, 255.0) / 255.0;
+
   glUseProgram(shader);
   glUniform3f(
       glGetUniformLocation(shader, "textColor"),
-      text->fontColor.r,
-      text->fontColor.g,
-      text->fontColor.b);
+      r, g, b);
 
   glActiveTexture(GL_TEXTURE0);
   glBindVertexArray(VAO);
 
-  int x = text->startPos.x, y = text->startPos.y;
+  glBindTexture(GL_TEXTURE_2D, ouiContext->fontTexture);
+
+  float vertices[6][4];
+  int order[6] = {0, 1, 2, 0, 2, 3};
+  float x = text->startPos.x, y = text->startPos.y;
 
   for (int i = 0; text->content[i] != '\0'; i++) {
-    char c = text->content[i];
-    if (c >= ouiContext->numCharacters) {
+    unsigned char c = text->content[i];
+
+    if (c == '\n') {
+      y -= text->lineHeight;
+      x = text->startPos.x;
       continue;
     }
 
-    FontCharacter ch = ouiContext->fontCharacters[(int)c];
-
-    float xpos = x + ch.Bearing.x * text->fontSize;
-    float ypos = y - (ch.Size.y - ch.Bearing.y) * text->fontSize;
-
-    float w = ch.Size.x * text->fontSize;
-    float h = ch.Size.y * text->fontSize;
-
-    xpos /= windowWidth;
-    ypos /= windowHeight;
-    w /= windowWidth;
-    h /= windowHeight;
-
-    float vertices[6][4] = {
-        {xpos, ypos + h, 0.0f, 0.0f},
-        {xpos, ypos, 0.0f, 1.0f},
-        {xpos + w, ypos, 1.0f, 1.0f},
-        {xpos, ypos + h, 0.0f, 0.0f},
-        {xpos + w, ypos, 1.0f, 1.0f},
-        {xpos + w, ypos + h, 1.0f, 0.0f}};
-
-    // render glyph texture over quad
-    glBindTexture(GL_TEXTURE_2D, ch.TextureID);
-
-    // update content of VBO memory
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-    // render quad
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-
-    // now advance cursors for next glyph (note that advance is number of 1/64 pixels)
-    x += (ch.Advance >> 6) * text->fontSize; // bitshift by 6 to get value in pixels (2^6 = 64)
-    float nextCharWidth = 0.0;
-
-    if (text->content[c + 1] != '\0') {
-      FontCharacter nextChar = ouiContext->fontCharacters[(int)text->content[c + 1]];
-      nextCharWidth = (nextChar.Advance >> 6) * text->fontSize;
+    if (
+        c < ouiContext->firstCharacterCodePoint ||
+        c > ouiContext->firstCharacterCodePoint + ouiContext->characterCount - 1) {
+      continue;
     }
 
-    if (text->maxLineWidth > 0 && x + nextCharWidth > text->maxLineWidth) {
-      x = text->startPos.x;
-      y -= text->lineHeight;
+    stbtt_packedchar *packedChar = &ouiContext->packedCharacters[c - ouiContext->firstCharacterCodePoint];
+    stbtt_aligned_quad *alignedQuad = &ouiContext->alignedQuads[c - ouiContext->firstCharacterCodePoint];
+
+    OuiVec2f glyphSize = {
+        (packedChar->x1 - packedChar->x0) * text->fontSize,
+        (packedChar->y1 - packedChar->y0) * text->fontSize,
+    };
+
+    OuiVec2f glyphBoundingBoxBottomLeft = {
+        x + (packedChar->xoff * text->fontSize),
+        y - (packedChar->yoff + packedChar->y1 - packedChar->y0) * text->fontSize,
+    };
+
+    OuiVec2f glyphVertices[4] = {
+        {glyphBoundingBoxBottomLeft.x + glyphSize.x, glyphBoundingBoxBottomLeft.y + glyphSize.y},
+        {glyphBoundingBoxBottomLeft.x, glyphBoundingBoxBottomLeft.y + glyphSize.y},
+        {glyphBoundingBoxBottomLeft.x, glyphBoundingBoxBottomLeft.y},
+        {glyphBoundingBoxBottomLeft.x + glyphSize.x, glyphBoundingBoxBottomLeft.y},
+    };
+
+    OuiVec2f glyphTextureCoords[4] = {
+        {alignedQuad->s1, alignedQuad->t0},
+        {alignedQuad->s0, alignedQuad->t0},
+        {alignedQuad->s0, alignedQuad->t1},
+        {alignedQuad->s1, alignedQuad->t1},
+    };
+
+    for (int j = 0; j < 6; j++) {
+      vertices[j][0] = glyphVertices[order[j]].x / (windowWidth / 2.0);
+      vertices[j][1] = glyphVertices[order[j]].y / (windowHeight / 2.0);
+      vertices[j][2] = glyphTextureCoords[order[j]].x;
+      vertices[j][3] = glyphTextureCoords[order[j]].y;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        0, sizeof(vertices), vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    x += packedChar->xadvance * text->fontSize;
+
+    unsigned char nextC = text->content[i + 1];
+    if (nextC != '\0') {
+      stbtt_packedchar *nextPackedChar = &ouiContext->packedCharacters[nextC - ouiContext->firstCharacterCodePoint];
+      float nextX = x + nextPackedChar->xadvance * text->fontSize;
+
+      if (
+          text->maxLineWidth > 0 &&
+          nextX - text->startPos.x > text->maxLineWidth) {
+        y -= text->lineHeight;
+        x = text->startPos.x;
+      }
     }
   }
 
@@ -883,58 +876,114 @@ void oui_draw_text(OuiContext *ouiContext, OuiText *text) {
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-OuiRectangle oui_get_text_hitbox(OuiContext *ouiContext, OuiText *text) {
-  OuiRectangle rectangle = {0};
+//----------------------------------------
+// Text
+//----------------------------------------
 
+//----------------------------------------
+// Rectangle <=> Text
+//----------------------------------------
+
+void oui_text_to_rectangle(OuiContext *ouiContext, OuiText *text, OuiRectangle *rectangle) {
   if (
       ouiContext == NULL ||
-      ouiContext->numCharacters == 0 ||
-      text == NULL || text->content == NULL) {
-    return rectangle;
+      ouiContext->characterCount == 0 ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE ||
+      text == NULL || text->content == NULL || rectangle == NULL) {
+    return;
   }
 
-  float lineWidth = 0;
-  float lastLineHeight = 0;
-  int x = text->startPos.x;
+  rectangle->width = 0;
+  rectangle->height = 0;
+  rectangle->centerPos.x = 0;
+  rectangle->centerPos.y = 0;
+
+  OuiVec2f topLeft = {0};
+  OuiVec2f bottomRight = {0};
+
+  float x = text->startPos.x, y = text->startPos.y;
   for (int i = 0; text->content[i] != '\0'; i++) {
     unsigned char c = text->content[i];
-    if (c >= ouiContext->numCharacters) {
+
+    if (c == '\n') {
+      y -= text->lineHeight;
+      x = text->startPos.x;
       continue;
     }
 
-    FontCharacter ch = ouiContext->fontCharacters[(unsigned int)c];
-
-    lineWidth += (ch.Advance >> 6) * text->fontSize;
-    lastLineHeight = oui_max(lastLineHeight, text->lineHeight + (ch.Size.y - ch.Bearing.y) * text->fontSize);
-
-    x += (ch.Advance >> 6) * text->fontSize;
-    float nextCharWidth = 0.0;
-
-    unsigned char c_next = text->content[c + 1];
-    if (text->content[c + 1] != '\0') {
-      FontCharacter nextChar = ouiContext->fontCharacters[(unsigned int)c_next];
-      nextCharWidth = (nextChar.Advance >> 6) * text->fontSize;
+    if (
+        c < ouiContext->firstCharacterCodePoint ||
+        c > ouiContext->firstCharacterCodePoint + ouiContext->characterCount - 1) {
+      continue;
     }
 
-    rectangle.width = oui_max(rectangle.width, lineWidth);
-    if (text->maxLineWidth > 0 && x + nextCharWidth > text->maxLineWidth) {
-      rectangle.height += text->lineHeight;
-      lineWidth = 0;
-      lastLineHeight = 0;
+    stbtt_packedchar *packedChar = &ouiContext->packedCharacters[c - ouiContext->firstCharacterCodePoint];
 
-      x = text->startPos.x;
+    OuiVec2f glyphSize = {
+        (packedChar->x1 - packedChar->x0) * text->fontSize,
+        (packedChar->y1 - packedChar->y0) * text->fontSize,
+    };
+
+    OuiVec2f glyphBoundingBoxBottomLeft = {
+        x + (packedChar->xoff * text->fontSize),
+        y - (packedChar->yoff + packedChar->y1 - packedChar->y0) * text->fontSize,
+    };
+
+    OuiVec2f glyphVertices[4] = {
+        {glyphBoundingBoxBottomLeft.x + glyphSize.x, glyphBoundingBoxBottomLeft.y + glyphSize.y},
+        {glyphBoundingBoxBottomLeft.x, glyphBoundingBoxBottomLeft.y + glyphSize.y},
+        {glyphBoundingBoxBottomLeft.x, glyphBoundingBoxBottomLeft.y},
+        {glyphBoundingBoxBottomLeft.x + glyphSize.x, glyphBoundingBoxBottomLeft.y},
+    };
+
+    if (i == 0) {
+      topLeft.x = glyphVertices[1].x;
+      topLeft.y = glyphVertices[1].y;
+
+      bottomRight.x = glyphVertices[3].x;
+      bottomRight.y = glyphVertices[3].y;
+    }
+
+    x += packedChar->xadvance * text->fontSize;
+    topLeft.y = oui_max(topLeft.y, glyphVertices[1].y);
+    bottomRight.x = oui_max(bottomRight.x, glyphVertices[3].x);
+    bottomRight.y = oui_min(bottomRight.y, glyphVertices[3].y);
+
+    unsigned char nextC = text->content[i + 1];
+    if (nextC != '\0') {
+      stbtt_packedchar *nextPackedChar = &ouiContext->packedCharacters[nextC - ouiContext->firstCharacterCodePoint];
+      float nextX = x + nextPackedChar->xadvance * text->fontSize;
+
+      if (
+          text->maxLineWidth > 0 &&
+          nextX - text->startPos.x > text->maxLineWidth) {
+        y -= text->lineHeight;
+        x = text->startPos.x;
+      }
     }
   }
 
-  rectangle.height += lastLineHeight;
-  rectangle.centerPos.x = text->startPos.x + rectangle.width / 2;
-  rectangle.centerPos.y = text->startPos.y - (rectangle.height) / 2 + text->lineHeight;
+  rectangle->width = bottomRight.x - topLeft.x;
+  rectangle->height = topLeft.y - bottomRight.y;
+  rectangle->centerPos.x = topLeft.x + rectangle->width / 2.0;
+  rectangle->centerPos.y = topLeft.y - rectangle->height / 2.0;
+}
 
-  return rectangle;
+void oui_rectangle_to_text(OuiContext *ouiContext, OuiRectangle *rectangle, OuiText *text) {
+  if (
+      ouiContext == NULL ||
+      text == NULL || rectangle == NULL ||
+      ouiContext->initStatus == OUI_STATUS_FAILURE) {
+    return;
+  }
+
+  text->maxLineWidth = rectangle->width;
+  text->startPos.x = rectangle->centerPos.x - rectangle->width / 2.0;
+  text->startPos.y = rectangle->centerPos.y + rectangle->height / 2.0;
 }
 
 //----------------------------------------
-// Text
+// Rectangle <=> Text
 //----------------------------------------
 
 //----------------------------------------
@@ -980,6 +1029,7 @@ static char *oui__glfw_rectangle_get_fragment_shader(OuiRectangle *rectangle) {
       "   FragColor = vColor;\n"
       "}\n\0";
 
+  OUI_UNUSED(rectangle);
   return fragmentShaderSource;
 }
 
@@ -1000,7 +1050,7 @@ static char *oui__glfw_rectangle_get_vertex_shader(OuiRectangle *rectangle) {
 
       "void main()\n"
       "{\n"
-      "   vColor = aBgColor / 256.0;\n"
+      "   vColor = aBgColor;\n"
 
       "   vec2 p = aPos.xy;\n"
       "   float w = aWidthHeightRotation.x;\n"
@@ -1024,6 +1074,7 @@ static char *oui__glfw_rectangle_get_vertex_shader(OuiRectangle *rectangle) {
       "   gl_Position = vec4(p, 0.0, 1.0);\n"
       "}\0";
 
+  OUI_UNUSED(rectangle);
   return vertexShaderSource;
 }
 
@@ -1044,7 +1095,7 @@ static char *oui__glfw_cercle_get_vertex_shader(void) {
 
       "void main()\n"
       "{\n"
-      "   vColor = aBgColor / 256.0;\n"
+      "   vColor = aBgColor;\n"
 
       "   vec2 p = aCenterPos + aPos.xy * aBorder.x;\n"
       "   p /= uWindowSize / 2.0;\n"
@@ -1068,6 +1119,7 @@ static char *oui__glfw_text_get_vertex_shader(OuiText *text) {
       "   gl_Position = vec4(vertex.xy, 0.0, 1.0);\n"
       "}\0";
 
+  OUI_UNUSED(text);
   return vertexShaderSource;
 }
 
@@ -1084,9 +1136,11 @@ static char *oui__glfw_text_get_fragment_shader(OuiText *text) {
       "void main()\n"
       "{\n"
       "   vec4 sampled = vec4(vec3(1.0), texture(text, TexCoords).r);\n"
-      "   color = vec4(textColor / 256.0, 1.0) * sampled;\n"
+      "   color = vec4(textColor, 1.0) * sampled;\n"
+      "   // color = vec4(textColor, 1.0);\n"
       "}\n\0";
 
+  OUI_UNUSED(text);
   return fragmentShaderSource;
 }
 

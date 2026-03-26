@@ -1,8 +1,0 @@
-R 16.000000 104.000000 219.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano2.mp3
-R 153.000000 193.000000 241.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano1.mp3
-R 165.000000 29.000000 45.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano4.mp3
-R 246.000000 97.000000 81.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano3.mp3
-R 38.000000 162.000000 105.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano6.mp3
-R 143.000000 240.000000 164.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano5.mp3
-R 97.000000 53.000000 131.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano8.mp3
-R 220.000000 138.000000 221.000000 255.000000 /home/karim/Documents/runaway-soundboard/piano7.mp3
