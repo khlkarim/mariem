@@ -1022,7 +1022,7 @@ void link_mouse_event_handler(AppState *app) {
 
   int state;
   state = mouse_button_states[GLFW_MOUSE_BUTTON_LEFT];
-  // a link listens for two mouse event: left and right click
+  // a link listens for two mouse events: left and right click
 
   if (state == PRESSED) {
     EntityId clickedLinkId = get_clicked_link(app);
