@@ -4,6 +4,7 @@
 #include <string.h>
 
 #define SRC_FOLDER "src/"
+#define LIB_FOLDER "lib/"
 #define BUILD_FOLDER "build/"
 #define INCLUDE_FOLDER "include/"
 

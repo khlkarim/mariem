@@ -73,6 +73,7 @@
 #define PRESSED GLFW_PRESS
 #define HELD GLFW_REPEAT
 
+#define KEYBINDING_SHIFT GLFW_KEY_LEFT_SHIFT
 #define KEYBINDING_ESCAPE GLFW_KEY_ESCAPE
 
 #define KEYBINDING_CREATE_NODE GLFW_KEY_N
@@ -534,7 +535,10 @@ void handle_key_bindings(AppState *app) {
   state = keyboard_key_states[KEYBINDING_CREATE_NODE];
   if (state == PRESSED) {
     create_node(app);
-    keyboard_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
+
+    if (keyboard_key_states[KEYBINDING_SHIFT] == OFF) {
+      keyboard_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
+    }
   }
 
   state = keyboard_key_states[KEYBINDING_DELETE_SELECTED];

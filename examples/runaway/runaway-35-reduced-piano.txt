@@ -1,0 +1,56 @@
+BPM 183.000000
+R 26.000000 95.000000 180.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano2.wav
+R 153.000000 193.000000 241.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano1.wav
+R 165.000000 29.000000 45.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano4.wav
+R 246.000000 97.000000 81.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano3.wav
+R 38.000000 162.000000 105.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano6.wav
+R 143.000000 240.000000 164.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano5-faded-in.wav
+R 129.000000 61.000000 156.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano8.wav
+R 220.000000 138.000000 221.000000 255.000000 /home/karim/dev/workspaces/personal/mariem/data/runaway-soundboard/piano-wav/piano7.wav
+N 2 1 -0.130607 0.268647
+N 0 0 -0.138276 -0.125278
+N 0 0 0.003283 0.203730
+N 0 0 -0.002213 -0.078465
+N 0 0 0.131673 -0.143408
+N 0 0 0.139349 0.250516
+L 2 3 0
+L 4 2 0
+L 1 2 0
+L 5 3 0
+L 1 3 0
+L 3 4 0
+L 4 1 0
+L 2 5 0
+L 4 5 0
+L 5 6 0
+L 6 3 0
+L 4 6 0
+L 6 1 0
+A N 1 2 4
+A N 2 4 4
+A N 3 1 1
+A N 4 5 6
+A N 5 1 2
+A N 7 4 2
+A N 8 2 3
+A N 9 4 6
+A N 10 5 5
+A N 11 6 8
+A N 12 4 8
+A N 13 6 7
+P N 1 3 4
+P N 1 4 4
+P N 2 2 3
+P N 3 2 4
+P N 4 3 6
+P N 4 4 6
+P N 5 3 2
+P N 5 4 2
+P N 7 1 1
+P N 8 5 6
+P N 9 5 5
+P N 10 6 8
+P N 11 3 8
+P N 11 4 8
+P N 12 6 7
+P N 13 1 2
