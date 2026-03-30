@@ -1,306 +1,208 @@
 mariem - A Visual Modeling Language
-<video>
+
+[![Watch the demo](https://img.youtube.com/vi/rmJHtfqorVU/maxresdefault.jpg)](https://youtu.be/rmJHtfqorVU)
 
 Building the executable:
 
 Dependencies: 
-I opted, whenever i could, for stb style libraries because they greatly simplify the build process.
-These are the libraries that i use, you shouldn't worry about these since they are included in the repo and are built with the main executable:
-- glad: for opengl function loading **
-- nob.h: used as a build system and for logging
-- miniaudio.h: i used its high level API for audio playback
-- tinyfiledialogs: for opening native message and file dialog
+I opted, whenever i could, to depend on stb-style or minimal libraries because they hugely simplify the build process.
+You shouldn't worry about these, since their source is included in the project and compiles with it, but they are worth mentioning. I used:
+- nob.h: as a build and a logging system.
+- miniaudio.h: used its high level API for audio playback.
+- tinyfiledialogs: for opening native file and message dialogs.
+- oui.h: a tiny library for drawing 2D graphics that i made simultanouesly with this project.
 
-BUT the library that you should worry about is glfw, since i couldn't find any good minimal alternatives. (there is RFGW, but its support for wayland is experimental, and guess what windowing system i use!)
-So for now you have to build GLFW from source and edit the nob.c file at the root of the project to link with 
-The official guide for compiling GLFW is pretty informative and should do the job.
-Atfer compiling it, you will end up with a libglfw3.a file 
+The dependency that you should worry about however is GLFW, which is a dependency of oui.h. To build the executable, you will first have to build GLFW from its source, which is included as a git submodule under ./lib/glfw. To build it you will need cmake. After installing cmake, just navigate to the ./lib/glfw folder and run the following commands: 
 
-on Linux 
-cc -o nob nob.c
-./nob 
+```bash
+git clone https://github.com/glfw/glfw.git . # if the directory is empty
+cmake -S. -Bbuild 
+cmake --build build
+```
 
-this will create a build directory if it does not exist and it will also 
-compile the project to  ./build/main 
+After this step, you should end up with a static library under ./build/src/libglfw3.a.
+If you face any issues building GLFW, [their official guide](https://www.glfw.org/docs/latest/compile.html) is a great resource.
 
-to compile the random project generator ./nob gen 
-to create a debug build: (it will produce gmont.a) files ./nob main debug 
+Now, you just have to compile the nob executable and run it to build the main project: 
+
+```bash
+# At the project's root 
+mkdir build
+cc -o ./build/nob ./nob.c
+./build/nob # this will compile the project and create: ./build/main
+
+# To compile a debug build of the project:
+./build/nob main debug
+
+# There is also a random-graph-generator that you can compile using this command:
+./build/nob gen # This will create ./build/gen
+```
+
+The above process should be platform independent, but i have only tested it on my linux machine.
+To test the windows build, i used mingw to cross-compile to windows and then ran the executable using wine. 
+It seemed to be working just fine, but the mingw-wine setup doesn't fully replicate the windows environment, so if you encounter any issues let me know.
+
+Note: The projects in the ./examples directory point to sound files that should exist in ./data, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them to my google drive, just download this file and extract it in the project's directory and the examples should work.
 
 Usage: 
-Running the compiled executable will put you face to face with the editor.
-The interaction with it keyboard centric, these are the main keybindings that let you do stuff:
-- create and delete nodes
-- add and remove colors
-- bind files to colors
-- color nodes
-- create links between nodes and color nodes 
+The interaction with the app is keyboard centric, these are the main keybindings that let you do stuff:
+|Key|Action|Description|
+|---|---|---|
+|N|Creates a [N]ode|This will create one node for every key press, pressing LEFT SHIFT along with N would let you spam-create nodes.|
+|D|[D]eletes the selected entity|The entity can be either be a node or a link, to select an entity you just click it|
+|S|[S]aves the current project to a file|this saves the BPM, nodes, links and color mappings to a txt file that you can later reload|
+|L|[L]oads a saved project|This just parces the contents of a project file, and adds them to the current scene, without removing anything that is already there|
 
-After you finished creating your nodes, linking them and giving them pretty colors, you can save your project to a file!
-loading a project 
-to make sure that everything is working for you can pick a file from the examples directory and load it as a project 
-pressing the space bar should make something happen  
+There are other keybindings that i didn't mention in this list.
+To see the full list, the keybindings are all defined as macros at the start of the ./src/main.c file.
+You can customize them by just changing those macros and then recompiling the app.
 
-interacting with the app
-keybindings
-since there is not that many things to do 
-the interaction is keyboard centric here are all the keybindings
-they are defined as macros at the start of the ./src/main.c file, you can just change them there and recompile the app if you want to customize them 
-
-Windows land
-i have been trying for two days to cross compile to windows using mingw and wine
-i have got to compile using this command:
-
-gcc -o ./build/main.exe ./src/main.c ./src/glad.c ./src/tinyfiledialogs.c -I./include -static ./lib/build/src/libglfw3.a -lgdi32 -lcomdlg32 -lole32 
+To make sure that everything is set up correctly, you can pick a file from the examples directory and load it as a project.
+Pressing the space bar should make something happen.
 
 Motivation
-What is mariem? And why do i call it a language?
-Well to answer that, i think we first need to answer a deeper question first:
-Why did i even make it in the first place?
+What is mariem? And why am i calling it a language?
+To answer this question, i think we first need to answer a deeper one first: Why did i even make it in the first place?
 
-Have you ever tried to use FlStudio?
-its a tool, more specifically a DAW - Digital audio interface, That lets you
-And if you have ever used it, you are probably familiar with this interface:
+Well, have you ever tried using FlStudio?
+Its a music production tool, more specifically a Digital Audio Interface (DAW), that lets you produce, mix, and master music.
+And if you have ever tried it, you are probably familiar with its interface:
+![FlStudio interface](./assets/flstudio.jpg)
 
-oh yea, its so intimiditing  
+Its a great tool, but oh my is the interface intimidating! And it has so much stuff, more than i could ever need or want.
 
-i did not need all that
-i had a simple mental model of beat making and 
-lived mostly in the beat maker
-but it kept bugging 
+This is what pushed me to find a simpler way of making music, something that just implements my own mental model of a beat: Sounds playing at discrete intervals of time.
 
-this irritation pushed me to implemente the simplest way i can think of making music
-this irritation pushed me to implemente my own mental model of music: different sounds that get played at discreate intervals of time 
+But for a while i couldn't find an intuitive way of doing this. Until last semester, when i took a systems modeling course, it served as an introduction to topics like: Petri nets, Colored Petri Nets and the B-method. 
 
-this problem kept ---- at the back of my head 
-now i iterated on this problem a couple of time 
-even tried making a simple API for making beats in python 
-its slow, very OOP and 
+And then and there it finally clicked! What if we took the colored directed graph structure of a CPT, made the firing of the transitions deterministic and then considered every transition as an operation of a B-Machine, having its own pre-condition and post-condition...
 
+Well, if we put all of this together with some sugar, spice, and everything nice, we'll get mariem!
+![Sugar, spice and everything nice!](./assets/sugar-spice-everything-nice.png)
 
-NOW THE ANSWER TO THE QUESTION! god i be yapping
+But how are we going to add determinism to the firing of the transitions?
+As you are building the graph, you will be able to select a subset of the nodes as starting nodes, from which the graph traversal will begin. 
+You can do this by clicking a node to select it, and then pressing H to make it a starting node.
 
-last semester i took a systems modeling course, it serves as an introduction to topics like: Petri nets, CPT and the b-method
-and there and then was mariem born, its the god daugther of colored petri nets and the b-method 
-if you take a colored petri nets graph and consider each transitions as an operation having a precondition and a postcondition
-and with some component-X, you add some determinism to the transitions, and kaboom you get mariem!
-were it takes the colored directed graph concept from CPT and the assertions and the performs from the B-method
+On each beat, and for every currently visited nodes, we check the pre-condition of every link connected to it, if that pre-condition is valid, the transition gets triggered:
+![Starting nodes](./assets/starting-nodes.gif)
 
-The mariem Manifest - My attempt at a formal definition:
-mariem is a modeling language, a kin to petri nets or state machines.
+And how are we going to define these pre-conditions and post-conditions?
+Defining the initial coloring of the graph, defining the coloring asserted by a transition, and defining the coloring performed by a transition all have one thing in common: We are always coloring the same graph with the same nodes and links, the only thing that actually changes is what that coloring means.
 
-mariem defines 5 primitive concepts 
+This is a perfect use case for ![Model Editing](https://lazyvim-ambitious-devs.phillips.codes/course/chapter-2/): "Modes simply mean that different keystrokes mean different things depending on which mode is currently active."
 
-The state of a program is a directed colored graph.
-The special thing about this graph is that only the node have colors but also the links between two!
+There are 4 modes:
+Initialize mode: In this mode you set the initial coloring of the graph (This is the default mode).
+![Initialize mode](./assets/initialize-mode.mp4)
 
-On top of this state is defined a meta language that has two types of statements, each link can have optionally have each of these types of statements attached to it:
-- assert statements: an assert statement is a pre-condition on the coloring of the graph that defines when the link/transition is triggerable 
-- perform statements: a perform statement is a post-condition/coloring-change that gets performed after its corresponding link gets executed
+Assert mode: If you click a link in Initialize mode and then press A, this will put you in assert mode, where you can edit the assert statement of the currently selected link.
+![Assert mode](./assets/assert-mode.mp4)
 
-Here is an example of an assert statement:
-<gif> 
+Perform mode: If you click a link in Initialize mode and then press P, this will put you in perform mode, where you can edit the perform statement of the currently selected link.
+![Perform mode](./assets/perform-mode.mp4)
 
-Here is an example of a perform statement:
-<gif>
+Note: If you press A or P without selecting a link nothing will happen. (which is bad UX, and i will fix this as soon as i can)
 
-And that's it!
-I don't know if this has cleared anything for you yet, but i think a tutorial would do the job!
+Playing mode: If you press SPACE the graph traversal will start. In this mode, you can still edit the active state of the graph and change to Assert and Perform modes without stopping the audio player.
+![Playing mode](./assets/playing-mode.mp4)
 
-Tutorial: Lets make some musik!
+If you press I in any of the above modes you will get back to Initialize mode.
 
-The purpose of this section is to get you familiar with the workflow of using the editor and how to translate your ideas into colorful graphs!
-We are going to make the Runaway melody seen in the demo video. 
+What does this have to do with music?
+Well if we associate a sound file to every color, and then, whenever a node is visited, we play the sound associated to its current color, you will get this:
+![All modes](./assets/all-modes.mp4)
 
-Here is the chords view from a remake of the song in FlStudio:
-<pic>
+Tutorial: Lets make some music!
 
-How would we represent this as graph?
-Well the naive approach would be to make a node for every beat, and color the nodes with the color of the sound that gets played on their corresponding beat.
-<video>
+The purpose of this section is to get you familiar with the workflow of using the graph editor.
+We are going to make the melody of [Runaway](https://open.spotify.com/track/3DK6m7It6Pw857FcQftMds) seen in the demo video!
 
-We would end up with X nodes and Y links 
-This actually What i did to make the drums for the demo: 
-<video>
+Here is ![a remake of the melody in FlStudio](https://www.youtube.com/watch?v=-32O_6eR6mY):
+![FlStudio remake](./assets/flstudio-remake.mp4)
 
-But this is boring! We can do better, i iterate it on a couple of times and the least i could make it is 6 nodes and Y links:
-<pic>
+How would we represent this as a graph?
+Well since the transitions fire every beat, the trivial way of doing this is to make a simple loop where every node maps to a beat, and plays its corresponding note:
+![Bruteforce](./assets/bruteforce.mp4)
 
-So lets see how we got there.
-Well the obvious observation we can make is that there is a repeating 4-beat pattern for every note.
-and the only thing that is changing is note that gets played 
+We would end up with 16 nodes and 16 links.
+And this is actually what i did to make the drums in the demo.
 
-sounds make to colors or resources as name them the code 
-and what do link or transitions map to? well the map to changes between colors 
+But this is boring! We can do better.
+I iterated on this a couple of times, and i was able to get it to 6 nodes and 12 links:
+![Reduced piano](./assets/reduced-piano.mp4)
 
-a cool quality of modeling languages is that they are modular, we don't to thing of the system and a whole 
-we can subdivide it into sub problems that we can work on seperatly and tie together to form a solution for the system as whole 
+So lets see how we can get there.
+Well, the obvious observation we can make is that there is a repeating 4-beat pattern for every note.
+And the only thing that is changing is the note that gets played. 
 
-so lets just consider the 4-beat pattern for only one note:
-<video>
+A cool property of modeling languages is that they are modular, we don't need to think of the system as a whole.
+We can rather subdivide it into sub-problems that we can work on independently and tie together at the end. 
+So lets just consider the 4-beat pattern for only one note.
+
+Conceptually, sounds map to colors and links map to color changes.
+We have two notes: a high note and a low note => 2 colors.
 
 How many color changes do we need? 
-we have two nodes: a high note and a low note 
-from beat 3 to beat 4 from, we transition from low to high, so lets make a link for that: 
-this link will assert that its starting link low and will perform coloring the destination node with high
-<vid>
+From beat 3 to beat 4, we transition from a low note to a high note, so lets make a link for that.
+This link will assert that its starting edge is a low note and will perform setting the destination edge to a high note:
+![Low to high transition](./assets/low-to-high.gif)
 
-between the other two beat the note does not change, so do we need a transition for them?
-well that a bit trick, lets imagine at a specific beat none of the transitions fire, would a transition fire at the next beat?
-well no! because the state that the assertion are computed against did not change: we are at a deadlock!
+Between the other two beats the note does not change, do we need a transition for them?
+Well that's a bit tricky, lets consider the case where at a specific beat none of the transitions fire, would a transition fire at the next beat?
+Well no! Because the state that didn't validate any of the assertions did not change from the previous beat to this one.
+So to keep the graph traversal alive, we will need to add a transition that does not change any colors.
 
-so we will need a transition from a light node to another light note to keep the machine alive:
-<gif>
+Now lets put all these together to form the 4-beat pattern:
+![Each note separately](./assets/each-note.mp4)
 
-change the asign color , gives us the rest if the notes 
-so we now have 4 small modules that play 4 beats each now after finishing note we just need to transition to the next 
-we can add a transition between every two consecutive notes, that assert that the starting node is low and performs sets the recieving node to high:
-<vid>
+Changing the assigned color, gives us the rest of the notes.
 
-cool! we are still at 16 links but now we only have 12 nodes 
+We have 4 small modules that play 4 beats each. Now, after finishing a note, we just need to transition to the next. 
+We can add a transition between every two consecutive notes that asserts that the previous note is done playing and transitions to the next one:
+![Combined notes](./assets/combined-notes.mp4)
 
-now to the key observation that will get us to the 6 nodes: 
-at the start of every 4-beat pattern, if we now 
-what is the earliest moment at which we can know the color of these nodes when the needle head reaches them? this maps to (what is the largest post-condition we can perform giving the precondition of that transition)
-lets move the responsibility of assigning the colors of those nodes to that transition 
-and now what do think about these two what makes distinct from the others 
-as the video plays, we can notice that those nodes stay unused whenever the note they are attached to is inactive 
-what can we do about that?
+Cool! Yes, we are still at 16 links but we now only have 12 nodes.
 
-The pattern is 4 beats long 
+Now to the key observation that will get us to just 6 nodes: 
+Lets consider these nodes: 
+![Annotated piano](./assets/annotated-notes.png)
 
-We don't have to think of the melody as a whole, but we can rather consider the first 4 
+What makes a pair special compared to the other pairs?
+Well, nothing! When a pair is being traversed, the others are inactive.
+If we try to reuse those nodes so that all the main nodes connect to the same pair, we'll get this:
+![Reduced piano](./assets/reduced-piano.mp4)
 
-Model Editing
+And kabom!
+I hope this gave you a good idea on how everything works. 
+You can play around with the drum sequence and see in how little entities you can represent it!
 
-this is the pattern view of the runaway melody
-the naive approach to modeling it in mariem is to set the approriate bpm and link each beat sequentially  (in the is actually what i did in the drums in the demo video)
-this will result in 4 * 4 nodes + 4 * 4 links
-but we can do better! we can do in just 6 nodes! and 4 * 2 + 4 + 1 links!
+The physics system:
+To me, the coolest part of the implementation, was implementing collision detection!
+![Dora the explorer](./assets/dora-the-explorer.jpg)
 
-if we try to reduce the representation of the melody, it least amount of information needed to reproduce it
-we will have 4 nodes, ! pattern
+The first version was the brute force approach of iterating over all the possible pairs of the nodes and checking if they are colliding using the formula: $dist(center_1, center_2) <= raduis_1 + raduis_2$. But this approach was too slow, it was bearly handling 600 nodes:
+![Bruteforce Call Graph](./assets/call-graph-bad.png)
 
-the coolest emmersient thing about mariem is that its very modular
-since all the nodes follow the same structure 
-we can try to model a single instance of that sturcture a 4 node 
-then will try to tie things together to get the full pattern 
+After reading the ![collision detection wikipedia page](https://en.wikipedia.org/wiki/Collision_detection), which compares the applicability of different detection algorithms. I stealed for the Sweep and Prune algorithm, because it was the simplest and best fit for our limited use case.
 
-i tried different solutions 
-this is the last one 
+And i didn't even implement the full algorithm! 
+Why? Well, checking if two complex objects are colliding is not a cheap operation, but its a necessary one to get accurate results. That's why collision detection is generally split into two phases, one that narrows down the candidates to consider for a specific object: the broad phase, and one that goes through those candidates that passed the broad phase and performs the exact expensive check: the narrow phase.
 
-there are three color changes in the pattern 
-dark light, light light and light dark 
+The Sweep and Prune algorithm is a broad phase algorithm. How does it eliminate unlikely candidates?
+It considers the bounding box of each object in the system, and checks for collisions between those boxes. To check if two boxes collide, we just need to make sure that they intersect on both the x and y axes. Since the axes are independent, this problem can be reduced to checking for intersections between intervals on a line: [A Leetcode problem](https://leetcode.com/problems/merge-intervals/description/) that can be solved in O(n*log(n)) by just sorting the intervals and then checking for intersections between the neighboring ones.
 
-so we have three transitions 
-one giving light gives dark, one given light returns light and one given dark gives light 
-now we need to tie them together 
+Step 1: We have to sort the boxes on the x-axis, then for each entity, we have to put the ones that intersect with it in a list: L
+Step 2: We have to sort the boxes on the y-axis, then for each entity, we remove from L the entities that don't intersect with it in the y-axes and keep the others. 
+After this, we would end up with the entities that pass the broad phase.
 
-the graph interpreter that gets run on the graph on every beat, defined by the bpm 
-the get the desired melody, w need to remove the intermediary transitions 
+But in step 2, since we are already iterating over the entities that intersect in the x-axes, and since we are dealing with simple circular object, whose exact check is not actually that expensive, why don't we just use the exact formula to eliminate the false positives on the x-axes? Well, that's exactly what i did! This is not an optimization however, since the overall complexity is still O(n * log(n)), but it significantly simplified the implementation.
 
-nice 
+Here is how the call-graph ended up after implementing Sweep and Prune:
+![Sweep and prune call graph](./assets/call-graph-good.png)
 
-why does it get stuck at the end and what can we do about it?
-well in the way i implemented the graph editor, it doesnt let you define two  links with the same direction 
-between two nodes 
-i made this choice to simplfy the implementation and i found that just stacking lines wouldnt look nice
-but as i try to model more stuff i found that it would be handy to have more than one link and it would sustationally reduce graph sizes
+We can now handle up to 3000 nodes! (There is a lot more to improve, but let's enjoy it for now)
+![3000 nodes](./assets/3000-nodes.mp4)
 
-but still this should not be a hard limitation, just a small inconvience for now and we can 
-mitigate it in various ways 
-
-how can we sove this here?
-well we just need to reinitialize the 7 to light after the dark gets played 
-and to change a color, we need a transition 
-
-the reason for this is the links are simple lines and the just stack
-
-now will add a repeater node so it doesnt get stuck on the last 
-
-now that was a nice tangent that i wanted to metion because it gives in neat idea on how mariem works
-but now lets scrap that! we dont want the same note to repeate over and over 
-well as we observed the structure of the nodes is the same 
-the only thing that is different  is the color, and that is an indicator that we only need to add more links and nodes! since 
-since the links can reuse the same  nodes by attributing to them the colors needed at a specific instance
-
-lets start small, lets merge two notes 
-we want the light of 8 to play after the dark of 7 
-well this neatly translates to a link between 8 and 7 that asserts that 7 is dark and that performs turning 8 light 
-
-we can even transition back from 8 to 7 
-
-that's it! if we can transition between two notes we can transition between all of them!
-we just need to add a transition between 8 and 9 and 9 and 10 ad 10 and 7 
-and that's actually all we need to tie all the melody together
-
-and voila!
-now given this 
-how small can you make the drums!
-this tutorial is meet to get you familiar with the interface and how it works
-i hope this gave you a good introduction on how 
-but in case the concepts i meant to convey got lost in translation, i think its approriate to provide a formal definition of the syntax and semantics of the language 
-
-how many nodes would we need if we had more transitions? well just two! and all the color change 
-data would be embeded in the transitions 
-
-
-Interesting implementation details:
-  Physics - Collisions
-    these are tall the formulas the code implementation,
-    i actually did not know that so little formulas can take you a long way!
-
-    to me the coolest thing about the implementation, was the collision detection!
-    the first version was so slow, but i kept rolling with it, because i had more essential stuff i needed to iron out 
-
-    but one day i woke up and  i said enough to the slowness!
-    i read the collision detection page on wikipedia, it compares different algorithms
-    i steadled for sweep and prune because it was the simplest, before read the other candidate was trees and it didnt fit the use case 
-
-    and i actually implement the full algothrim 
-    now imagine you have a set of complex object you wanna a check they collide 
-    well check if two complex arbitrary (convex or concave) polygons it is not cheap enough to perform o(n**2) detection 
-    
-    the idea behind collision is to split it into phases one that narrows down the candidates that a specific node collides by elimiting unlikly collision  with this is called the broad phase and one that goes throught the likely collisies that passed the broad test and if they collide using the exact expesive formulas
-
-    the sweep and prune algorithm is a broad phase algothrim, how does it eliminate unlikely collisions from being considered in the narrow phase? well it replaced each entity in the system by its containing rectangle, and then checks collisions between those rectangles, how do we check a collision between two rectangles? well they intersect on both, the x and y axis, cool that a sheep computation, but arent we still using o(n**2) which would be still slow as n becomes large?, well thats the neat part about snp, the problem can be reduced to checking for intersections between interval on a one D line, a leetcode problem that can be solved in o(nlog(n))! well we just sort the intervals by there lower end and than check collisions 
-
-    As i got to implemets this i realised that i was dealing with simple cercle not complex shapes! 
-    So instead of implementing the second sort phase i just iterate over the candidates check sphere to sphere collision using the formula 
-
-    here are the performance comparasens before and after, and here is what is would look like for the screen to be filled with BALLS
-  Miniaudio
-  very cool library, but i was holding it wrong for so long time
-  until i implemented the full runaway demo and it ran it only 60fps!!!
-  at first i suspected that the physics was the problem, but as i looked more it
-how i was using it 
-how i use it now 
-and it actually improved but i was not satisfied and i mean the sound stuturing was still noticable 
-so i looked more into the call graph and untill i encountered mp3_decode and oh my! i was using compressed mp3 files and Miniaudio had to decode them every time i wanted to play a sound, so i migrated to using wav file and lived happly ever after  
-
-  Project management: normilized devide coordinates
-i make it so that you can save the positions of the nodes 
-because i 
-i made a random project generator 
-i used nob walk dir! very cool stuff, i just copied this example and it nicely fit the use case 
-i just has to add the core logic and make so changes 
-
-  UI and layout
-    the whole thing is implemented on top of oui.h a library i implemented en parallel and it just exposes two functions! more on it here 
-
-Resources:
-Known bugs
-the beat break down is from here 
-i couldnt find a sample pack for the sound in runaway 
-so i just looked for break does only 
-i found this one 
-i downloaded it as an mp3 and opened it in audacity to get the bass and the horns  that play in the background when the beat drops 
-since the drums where drowned in the other sounds 
-i used audacity to chop the original song that kanye samped to make runaway 
-i made a project that ground the different resources and attribtes colors to them 
-i make it so that you can save the positions of the nodes 
-because i 
-i made a random project generator 
-i used nob walk dir! very cool stuff, i just copied this example and it nicely fit the use case 
-i just has to add the core logic and make so changes 
-the data used in the examples is kinda large, so i packed it in a zip file and uploaded it hear 
-
+And that's it!
+If you got it working, i hope you enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and thank you for your time!

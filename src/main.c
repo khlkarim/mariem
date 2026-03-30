@@ -612,7 +612,11 @@ void handle_key_bindings(AppState *app) {
   state = keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE];
   if (state == PRESSED) {
     if (app->selectedNodeId != NIL) {
-      entityManager->initNeedles[app->selectedNodeId] = entityManager->initNeedles[app->selectedNodeId] == YES ? NO : YES;
+      if (app->inputMode == INPUT_MODE_INITIALIZE) {
+        entityManager->initNeedles[app->selectedNodeId] = entityManager->initNeedles[app->selectedNodeId] == YES ? NO : YES;
+      } else if (app->inputMode == INPUT_MODE_PLAYING) {
+        entityManager->currNeedles[app->selectedNodeId] = entityManager->currNeedles[app->selectedNodeId] == YES ? NO : YES;
+      }
     }
     keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE] = RELEASED;
   }
