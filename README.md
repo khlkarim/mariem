@@ -1,18 +1,18 @@
-mariem - A Visual Modeling Language
+# mariem - A Visual Modeling Language
 
 [![Watch the demo](https://img.youtube.com/vi/rmJHtfqorVU/maxresdefault.jpg)](https://youtu.be/rmJHtfqorVU)
 
-Building the executable:
+## Building the executable
 
-Dependencies: 
+### Dependencies
 I opted, whenever i could, to depend on stb-style or minimal libraries because they hugely simplify the build process.
 You shouldn't worry about these, since their source is included in the project and compiles with it, but they are worth mentioning. I used:
-- nob.h: as a build and a logging system.
-- miniaudio.h: used its high level API for audio playback.
-- tinyfiledialogs: for opening native file and message dialogs.
-- oui.h: a tiny library for drawing 2D graphics that i made simultanouesly with this project.
+- [nob.h](https://github.com/tsoding/nob.h): as a build and a logging system.
+- [miniaudio.h](miniaud.io): used its high level API for audio playback.
+- [tinyfiledialogs](https://tinyfiledialogs.sourceforge.net): for opening native file and message dialogs.
+- [oui.h](https://github.com/khlkarim/oui.h): a tiny library for drawing 2D graphics that i made simultanouesly with this project.
 
-The dependency that you should worry about however is GLFW, which is a dependency of oui.h. To build the executable, you will first have to build GLFW from its source, which is included as a git submodule under ./lib/glfw. To build it you will need cmake. After installing cmake, just navigate to the ./lib/glfw folder and run the following commands: 
+The dependency that you **should** worry about however is **GLFW**, which is a dependency of oui.h. To build the executable, you will first have to build GLFW from its source, which is included as a git submodule under `./lib/glfw`. To build it you will need cmake. After installing cmake, just navigate to the `./lib/glfw` folder and run the following commands: 
 
 ```bash
 git clone https://github.com/glfw/glfw.git . # if the directory is empty
@@ -20,7 +20,7 @@ cmake -S. -Bbuild
 cmake --build build
 ```
 
-After this step, you should end up with a static library under ./build/src/libglfw3.a.
+After this step, you should end up with a static library under `./build/src/libglfw3.a`.
 If you face any issues building GLFW, [their official guide](https://www.glfw.org/docs/latest/compile.html) is a great resource.
 
 Now, you just have to compile the nob executable and run it to build the main project: 
@@ -42,7 +42,7 @@ The above process should be platform independent, but i have only tested it on m
 To test the windows build, i used mingw to cross-compile to windows and then ran the executable using wine. 
 It seemed to be working just fine, but the mingw-wine setup doesn't fully replicate the windows environment, so if you encounter any issues let me know.
 
-Note: The projects in the ./examples directory point to sound files that should exist in ./data, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them to my google drive, just download this file and extract it in the project's directory and the examples should work.
+Note: The projects in the `./examples` directory point to sound files that should exist in `./data`, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them to my google drive, just download this file and extract it in the project's directory and the examples should work.
 
 Usage: 
 The interaction with the app is keyboard centric, these are the main keybindings that let you do stuff:
@@ -54,7 +54,7 @@ The interaction with the app is keyboard centric, these are the main keybindings
 |L|[L]oads a saved project|This just parces the contents of a project file, and adds them to the current scene, without removing anything that is already there|
 
 There are other keybindings that i didn't mention in this list.
-To see the full list, the keybindings are all defined as macros at the start of the ./src/main.c file.
+To see the full list, the keybindings are all defined as macros at the start of the `./src/main.c` file.
 You can customize them by just changing those macros and then recompiling the app.
 
 To make sure that everything is set up correctly, you can pick a file from the examples directory and load it as a project.
@@ -62,7 +62,7 @@ Pressing the space bar should make something happen.
 
 Motivation
 What is mariem? And why am i calling it a language?
-To answer this question, i think we first need to answer a deeper one first: Why did i even make it in the first place?
+To answer that, i think we first need to answer a deeper one first: Why did i even make it in the first place?
 
 Well, have you ever tried using FlStudio?
 Its a music production tool, more specifically a Digital Audio Interface (DAW), that lets you produce, mix, and master music.
@@ -93,8 +93,7 @@ On each beat, and for every currently visited nodes, we check the pre-condition 
 And how are we going to define these pre-conditions and post-conditions?
 Defining the initial coloring of the graph, defining the coloring asserted by a transition, and defining the coloring performed by a transition all have one thing in common: We are always coloring the same graph with the same nodes and links, the only thing that actually changes is what that coloring means.
 
-This is a perfect use case for ![Model Editing](https://lazyvim-ambitious-devs.phillips.codes/course/chapter-2/): "Modes simply mean that differen![starting-nodes](https://github.com/user-attachments/assets/354ccc89-2263-4342-bd4b-7597af806bbb)
-t keystrokes mean different things depending on which mode is currently active."
+This is a perfect use case for ![Model Editing](https://lazyvim-ambitious-devs.phillips.codes/course/chapter-2/): "Modes simply mean that different keystrokes mean different things depending on which mode is currently active."
 
 There are 4 modes:
 Initialize mode: In this mode you set the initial coloring of the graph (This is the default mode).
