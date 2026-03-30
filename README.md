@@ -5,14 +5,16 @@
 ## Building the executable
 
 ### Dependencies
-I opted, whenever i could, to depend on stb-style or minimal libraries because they hugely simplify the build process.
+I opted, whenever i could, to depend on **stb-style** or minimal libraries because they hugely simplify the build process.
 You shouldn't worry about these, since their source is included in the project and compiles with it, but they are worth mentioning. I used:
 - [nob.h](https://github.com/tsoding/nob.h): as a build and a logging system.
 - [miniaudio.h](miniaud.io): used its high level API for audio playback.
 - [tinyfiledialogs](https://tinyfiledialogs.sourceforge.net): for opening native file and message dialogs.
 - [oui.h](https://github.com/khlkarim/oui.h): a tiny library for drawing 2D graphics that i made simultanouesly with this project.
 
-The dependency that you **should** worry about however is **GLFW**, which is a dependency of oui.h. To build the executable, you will first have to build GLFW from its source, which is included as a git submodule under `./lib/glfw`. To build it you will need cmake. After installing cmake, just navigate to the `./lib/glfw` folder and run the following commands: 
+The dependency that you **should** worry about however is **GLFW**, which is a dependency of oui.h. To build the executable, you will first have to build GLFW from its source, which is included as a git submodule under `./lib/glfw`. To build it you will need cmake. 
+
+After installing cmake, just navigate to the `./lib/glfw` folder and run the following commands: 
 
 ```bash
 git clone https://github.com/glfw/glfw.git . # if the directory is empty
@@ -42,9 +44,10 @@ The above process should be platform independent, but i have only tested it on m
 To test the windows build, i used mingw to cross-compile to windows and then ran the executable using wine. 
 It seemed to be working just fine, but the mingw-wine setup doesn't fully replicate the windows environment, so if you encounter any issues let me know.
 
-Note: The projects in the `./examples` directory point to sound files that should exist in `./data`, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them to my google drive, just download this file and extract it in the project's directory and the examples should work.
+>[!WARNING]
+>The projects in the `./examples` directory point to sound files that should exist in `./data`, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them to a github release.
 
-Usage: 
+## Usage 
 The interaction with the app is keyboard centric, these are the main keybindings that let you do stuff:
 |Key|Action|Description|
 |---|---|---|
@@ -60,29 +63,31 @@ You can customize them by just changing those macros and then recompiling the ap
 To make sure that everything is set up correctly, you can pick a file from the examples directory and load it as a project.
 Pressing the space bar should make something happen.
 
-Motivation
-What is mariem? And why am i calling it a language?
-To answer that, i think we first need to answer a deeper one first: Why did i even make it in the first place?
+## Motivation
+**What is mariem? And why am i calling it a language?**
 
-Well, have you ever tried using FlStudio?
+To answer that, i think we first need to answer a deeper one first: **Why did i even make it in the first place?**
+
+Well, have you ever tried using **FlStudio**?
 Its a music production tool, more specifically a Digital Audio Interface (DAW), that lets you produce, mix, and master music.
 And if you have ever tried it, you are probably familiar with its interface:
 
 ![FlStudio interface](./assets/flstudio.jpg)
 
-Its a great tool, but oh my is the interface intimidating! And it has so much stuff, more than i could ever need or want.
+Its a great tool, but oh my is the interface **intimidating**! And it has so much stuff, more than i could ever need or want.
 
-This is what pushed me to find a simpler way of making music, something that just implements my own mental model of a beat: Sounds playing at discrete intervals of time.
+This is what pushed me to find a simpler way of making music, something that just implements my own mental model of a beat: sounds playing at discrete intervals of time.
 
-But for a while i couldn't find an intuitive way of doing this. Until last semester, when i took a systems modeling course, it served as an introduction to topics like: Petri nets, Colored Petri Nets and the B-method. 
+But for a while i couldn't find an intuitive way of doing this. Until last semester, when i took a systems modeling course, it served as an introduction to topics like: **Petri nets**, **Colored Petri Nets** and **the B-method**. 
 
-And then and there it finally clicked! What if we took the colored directed graph structure of a CPT, made the firing of the transitions deterministic and then considered every transition as an operation of a B-Machine, having its own pre-condition and post-condition...
+And there and then it finally clicked! What if we took the **colored directed graph** structure of a CPT, made the firing of the transitions **deterministic** and then considered every transition as an operation of a B-Machine, having its own **pre-condition** and **post-condition**...
 
 Well, if we put all of this together with some sugar, spice, and everything nice, we'll get mariem!
 
 ![Sugar, spice and everything nice!](./assets/sugar-spice-everything-nice.png)
 
-But how are we going to add determinism to the firing of the transitions?
+**But how are we going to add determinism to the firing of the transitions?**
+
 As you are building the graph, you will be able to select a subset of the nodes as starting nodes, from which the graph traversal will begin. 
 You can do this by clicking a node to select it, and then pressing H to make it a starting node.
 
@@ -90,42 +95,46 @@ On each beat, and for every currently visited nodes, we check the pre-condition 
 
 ![Starting nodes](https://github.com/user-attachments/assets/dfdbd9f9-d78b-497c-bc76-d17a6ef6da43)
 
-And how are we going to define these pre-conditions and post-conditions?
+**And how are we going to define these pre-conditions and post-conditions?**
+
 Defining the initial coloring of the graph, defining the coloring asserted by a transition, and defining the coloring performed by a transition all have one thing in common: We are always coloring the same graph with the same nodes and links, the only thing that actually changes is what that coloring means.
 
 This is a perfect use case for ![Model Editing](https://lazyvim-ambitious-devs.phillips.codes/course/chapter-2/): "Modes simply mean that different keystrokes mean different things depending on which mode is currently active."
 
 There are 4 modes:
-Initialize mode: In this mode you set the initial coloring of the graph (This is the default mode).
+
+**Initialize mode**: In this mode you set the initial coloring of the graph (This is the default mode).
 
 ![Initialze mode](https://github.com/user-attachments/assets/c99e2cb6-f875-4056-900b-cd11bf07eed7)
 
-Assert mode: If you click a link in Initialize mode and then press A, this will put you in assert mode, where you can edit the assert statement of the currently selected link.
+**Assert mode**: If you click a link in Initialize mode and then press A, this will put you in assert mode, where you can edit the assert statement of the currently selected link.
 
 ![Assert mode](https://github.com/user-attachments/assets/3be85f18-9f0e-407d-9729-d5e6416c5321)
 
-Perform mode: If you click a link in Initialize mode and then press P, this will put you in perform mode, where you can edit the perform statement of the currently selected link.
+**Perform mode**: If you click a link in Initialize mode and then press P, this will put you in perform mode, where you can edit the perform statement of the currently selected link.
 
 ![Perform mode](https://github.com/user-attachments/assets/ac3b4893-7195-4d9b-ad63-99ae5da22589)
 
-Note: If you press A or P without selecting a link nothing will happen. (which is bad UX, and i will fix this as soon as i can)
+>[!WARNING]
+>If you press A or P without selecting a link nothing will happen. (which is bad UX, and i will fix this as soon as i can)
 
-Playing mode: If you press SPACE the graph traversal will start. In this mode, you can still edit the active state of the graph and change to Assert and Perform modes without stopping the audio player.
+**Playing mode**: If you press SPACE the graph traversal will start. In this mode, you can still edit the active state of the graph and change to Assert and Perform modes without stopping the audio player.
 
 ![Playing mode](https://github.com/user-attachments/assets/2c53daaf-ca37-483c-a0d9-2a83eb3a3512)
 
-If you press I in any of the above modes you will get back to Initialize mode.
+If you press I in any of the above modes you will get back to **Initialize mode**.
 
-Tutorial: Lets make some music!
+## Tutorial: Lets make some music!
 
 The purpose of this section is to get you familiar with the workflow of using the graph editor.
 We are going to make the melody of [Runaway](https://open.spotify.com/track/3DK6m7It6Pw857FcQftMds) seen in the demo video!
 
 Here is [a remake of the melody in FlStudio](https://www.youtube.com/watch?v=-32O_6eR6mY):
 
-![FlStudio remake](./assets/flstudio-remake.mp4)
+[FlStudio remake](https://github.com/user-attachments/assets/002c65af-8e37-4f18-8f1b-176c63c263c0)
 
-How would we represent this as a graph?
+**How would we represent this as a graph?**
+
 Well since the transitions fire every beat, the trivial way of doing this is to make a simple loop where every node maps to a beat, and plays its corresponding note:
 
 [Bruteforce](https://github.com/user-attachments/assets/c3f4fdff-9988-46fd-9fd2-f12c149d6c07)
@@ -149,13 +158,15 @@ So lets just consider the 4-beat pattern for only one note.
 Conceptually, sounds map to colors and links map to color changes.
 We have two notes: a high note and a low note => 2 colors.
 
-How many color changes do we need? 
+**How many color changes do we need?**
+
 From beat 3 to beat 4, we transition from a low note to a high note, so lets make a link for that.
 This link will assert that its starting edge is a low note and will perform setting the destination edge to a high note:
 
 ![Low to high transition](./assets/low-to-high.gif)
 
-Between the other two beats the note does not change, do we need a transition for them?
+Between the other two beats the note does not change, **do we need a transition for them?**
+
 Well that's a bit tricky, lets consider the case where at a specific beat none of the transitions fire, would a transition fire at the next beat?
 Well no! Because the state that didn't validate any of the assertions did not change from the previous beat to this one.
 So to keep the graph traversal alive, we will need to add a transition that does not change any colors.
@@ -182,18 +193,19 @@ What makes a pair special compared to the other pairs?
 Well, nothing! When a pair is being traversed, the others are inactive.
 If we try to reuse those nodes so that all the main nodes connect to the same pair, we'll get this:
 
-![Reduced piano](https://github.com/user-attachments/assets/75eec5f2-c4c8-4435-8e63-3d6227473ad9)
+[Reduced piano](https://github.com/user-attachments/assets/75eec5f2-c4c8-4435-8e63-3d6227473ad9)
 
-And kaboom!
+And voila!
+
 I hope this gave you a good idea on how everything works. 
 You can play around with the drum sequence and see in how little entities you can represent it!
 
-The physics system:
+# Implementation detail: The physics system
 To me, the coolest part of the implementation, was implementing collision detection!
 
 ![Dora the explorer](./assets/dora-the-explorer.jpg)
 
-The first version was the brute force approach of iterating over all the possible pairs of the nodes and checking if they are colliding using the formula: $dist(center_1, center_2) <= raduis_1 + raduis_2$. But this approach was too slow, it was bearly handling 600 nodes:
+The first version was the brute force approach of iterating over all the possible pairs of the nodes and checking if they are colliding using the formula: $||c_1 - c_2|| \le r_1 + r_2$. But this approach was too slow, it was bearly handling 600 nodes:
 
 ![Bruteforce Call Graph](./assets/call-graph-bad.png)
 
@@ -219,5 +231,6 @@ We can now handle up to 3000 nodes! (There is a lot more to improve, but let's e
 
 [3000 nodes](https://github.com/user-attachments/assets/509548a6-08fe-4364-8e22-d4608ad232f0)
 
-And that's it!
-If you got it working, i hope you enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and thank you for your time!
+## Final Note
+
+If you got it working, i hope you enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and **thank you for your time!**
