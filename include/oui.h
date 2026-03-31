@@ -5,6 +5,7 @@
 #define OUI_DEFAULT_WINDOW_HEIGHT 600
 #define OUI_DEFAULT_BASE_FONT_SIZE 48.0
 #define OUI_DEFAULT_FONT "fonts/arial.ttf"
+#define OUI_DEFAULT_BACKGROUND_COLOR OUI_COLOR_BLACK
 #define OUI_DEFAULT_WINDOW_TITLE "Default window title"
 
 #define OUI_COLOR_BLACK ((OuiColor){0.0, 0.0, 0.0, 255.0})
