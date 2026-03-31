@@ -1,0 +1,50 @@
+R 47.000000 160.000000 180.000000 256.000000 ./data/keys.wav/c1.wav
+R 153.000000 75.000000 155.000000 256.000000 ./data/keys.wav/f1s.wav
+R 145.000000 229.000000 141.000000 256.000000
+R 207.000000 171.000000 219.000000 256.000000 ./data/drum-kit/[105] Egyptian Luvr.wav
+R 199.000000 163.000000 100.000000 256.000000 ./data/runaway-soundboard/hats2.wav
+R 234.000000 111.000000 119.000000 256.000000 ./data/drum-kit/[CLAP] SIde.wav
+R 165.000000 66.000000 185.000000 256.000000 ./data/runaway-soundboard/effective-drums/hats1.wav
+R 95.000000 249.000000 77.000000 256.000000 ./data/drum-kit/[84] Cool Fills.wav
+R 153.000000 1.000000 235.000000 256.000000 ./data/drum-kit/[SNARE] Hey.wav
+R 76.000000 135.000000 94.000000 256.000000 ./data/runaway-soundboard/piano-wav/piano6.wav
+N 0 0
+N 0 1
+N 0 1
+N 8 1
+N 0 0
+N 0 0
+N 2 1
+N 0 0
+N 0 0
+N 0 1
+L 5 6 1
+L 7 8 1
+L 7 2 2
+L 1 10 0
+L 6 7 1
+L 10 3 2
+L 8 3 2
+L 8 10 0
+L 9 10 2
+L 9 10 2
+A N 7 7 6
+A L 1 10 1
+A N 10 10 8
+A L 9 3 1
+A N 4 3 4
+A N 10 3 3
+A L 8 3 1
+A L 1 6 2
+A L 5 1 1
+A L 2 3 2
+P L 4 5 2
+P N 9 2 3
+P L 4 9 2
+P N 1 2 2
+P L 5 8 1
+P L 6 8 2
+P N 10 6 6
+P N 1 1 4
+P N 7 5 8
+P N 7 2 10

@@ -1,9 +1,10 @@
 #define NOB_IMPLEMENTATION
-#include "include/nob.h"
+#include "lib/nob.h"
 
 #include <string.h>
 
 #define SRC_FOLDER "src/"
+#define LIB_FOLDER "lib/"
 #define BUILD_FOLDER "build/"
 #define INCLUDE_FOLDER "include/"
 
@@ -61,15 +62,42 @@ int build_main(BuildType type) {
   nob_cc_inputs(
       &cmd,
       SRC_FOLDER "main.c",
-      SRC_FOLDER "glad.c",
-      SRC_FOLDER "tinyfiledialogs.c");
+      LIB_FOLDER "glad/src/glad.c",
+      LIB_FOLDER "tinyfiledialogs/tinyfiledialogs.c");
 
   nob_cmd_append(&cmd, "-I" INCLUDE_FOLDER);
-  nob_cmd_append(&cmd, "-lm", "-ldl", "-lpthread", "-lglfw");
+
+  nob_cmd_append(&cmd, "-I" LIB_FOLDER);
+  nob_cmd_append(&cmd, "-I" LIB_FOLDER "glad/include");
+  nob_cmd_append(&cmd, "-I" LIB_FOLDER "tinyfiledialogs");
+
+  nob_cmd_append(&cmd, "-I" LIB_FOLDER "glfw/include");
+  nob_cmd_append(&cmd, "-L" LIB_FOLDER "glfw/build/src");
+
+#if _WIN32
+  nob_cmd_append(
+      &cmd,
+      "-lm",
+      "-lpthread",
+      "-lglfw3",
+      "-lgdi32",
+      // tinyfiledialogs links with -lcomdlg32 -lole32 on windows
+      "-lcomdlg32",
+      "-lole32");
+#else
+  nob_cmd_append(
+      &cmd,
+      "-lm",
+      "-ldl",
+      "-lpthread",
+      "-lglfw3");
+#endif
 
   if (!nob_cmd_run(&cmd)) {
     return 1;
   }
+
+  return 0;
 }
 
 int build_gen(void) {
@@ -85,13 +113,12 @@ int build_gen(void) {
 
   nob_cc_output(&cmd, BUILD_FOLDER "gen");
 
-  nob_cc_inputs(
-      &cmd,
-      SRC_FOLDER "gen.c");
-
-  nob_cmd_append(&cmd, "-I" INCLUDE_FOLDER);
+  nob_cc_inputs(&cmd, SRC_FOLDER "gen.c");
+  nob_cmd_append(&cmd, "-I" LIB_FOLDER);
 
   if (!nob_cmd_run(&cmd)) {
     return 1;
   }
+
+  return 1;
 }

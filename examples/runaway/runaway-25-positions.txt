@@ -1,14 +1,13 @@
 BPM 120.000000
 R 203.000000 68.000000 219.000000 255.000000 
-R 16.000000 104.000000 219.000000 255.000000 ./data/runaway-soundboard/piano2.mp3
-R 153.000000 193.000000 241.000000 255.000000 ./data/runaway-soundboard/piano1.mp3
-R 165.000000 29.000000 45.000000 255.000000 ./data/runaway-soundboard/piano4.mp3
-R 246.000000 97.000000 81.000000 255.000000 ./data/runaway-soundboard/piano3.mp3
-R 38.000000 162.000000 105.000000 255.000000 ./data/runaway-soundboard/piano6.mp3
-R 143.000000 240.000000 164.000000 255.000000 ./data/runaway-soundboard/piano5.mp3
-R 97.000000 53.000000 131.000000 255.000000 ./data/runaway-soundboard/piano8.mp3
-R 220.000000 138.000000 221.000000 255.000000 ./data/runaway-soundboard/piano7.mp3
-R 220.000000 138.000000 221.000000 255.000000 ./data/runaway-soundboard/piano7.mp3
+R 16.000000 104.000000 219.000000 255.000000 ./data/runaway-soundboard/piano/piano2.wav
+R 153.000000 193.000000 241.000000 255.000000 ./data/runaway-soundboard/piano/piano1.wav
+R 165.000000 29.000000 45.000000 255.000000 ./data/runaway-soundboard/piano/piano4.wav
+R 246.000000 97.000000 81.000000 255.000000 ./data/runaway-soundboard/piano/piano3.wav
+R 38.000000 162.000000 105.000000 255.000000 ./data/runaway-soundboard/piano/piano6.wav
+R 143.000000 240.000000 164.000000 255.000000 ./data/runaway-soundboard/piano/piano5.wav
+R 97.000000 53.000000 131.000000 255.000000 ./data/runaway-soundboard/piano/piano8.wav
+R 220.000000 138.000000 221.000000 255.000000 ./data/runaway-soundboard/piano/piano7.wav
 N 3 1 -0.097597 -0.305699
 N 0 0 -0.601634 -0.343310
 N 0 0 -0.331735 -0.578456

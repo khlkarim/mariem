@@ -73,6 +73,7 @@
 #define PRESSED GLFW_PRESS
 #define HELD GLFW_REPEAT
 
+#define KEYBINDING_SHIFT GLFW_KEY_LEFT_SHIFT
 #define KEYBINDING_ESCAPE GLFW_KEY_ESCAPE
 
 #define KEYBINDING_CREATE_NODE GLFW_KEY_N
@@ -534,7 +535,10 @@ void handle_key_bindings(AppState *app) {
   state = keyboard_key_states[KEYBINDING_CREATE_NODE];
   if (state == PRESSED) {
     create_node(app);
-    keyboard_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
+
+    if (keyboard_key_states[KEYBINDING_SHIFT] == OFF) {
+      keyboard_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
+    }
   }
 
   state = keyboard_key_states[KEYBINDING_DELETE_SELECTED];
@@ -608,7 +612,11 @@ void handle_key_bindings(AppState *app) {
   state = keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE];
   if (state == PRESSED) {
     if (app->selectedNodeId != NIL) {
-      entityManager->initNeedles[app->selectedNodeId] = entityManager->initNeedles[app->selectedNodeId] == YES ? NO : YES;
+      if (app->inputMode == INPUT_MODE_INITIALIZE) {
+        entityManager->initNeedles[app->selectedNodeId] = entityManager->initNeedles[app->selectedNodeId] == YES ? NO : YES;
+      } else if (app->inputMode == INPUT_MODE_PLAYING) {
+        entityManager->currNeedles[app->selectedNodeId] = entityManager->currNeedles[app->selectedNodeId] == YES ? NO : YES;
+      }
     }
     keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE] = RELEASED;
   }

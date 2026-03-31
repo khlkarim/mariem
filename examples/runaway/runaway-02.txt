@@ -1,6 +1,6 @@
 BPM 85.000000
-R 237.000000 51.000000 59.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/kick1.wav
-R 53.000000 132.000000 228.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/hats1.wav
+R 237.000000 51.000000 59.000000 255.000000 ./data/runaway-soundboard/drums/kick1.wav
+R 53.000000 132.000000 228.000000 255.000000 ./data/runaway-soundboard/drums/hats1.wav
 N 1 1
 N 2 0
 N 0 0
