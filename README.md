@@ -56,6 +56,9 @@ The interaction with the app is keyboard centric, these are the main keybindings
 |S|[S]aves the current project to a file|this saves the BPM, nodes, links and color mappings to a txt file that you can later reload|
 |L|[L]oads a saved project|This just parces the contents of a project file, and adds them to the current scene, without removing anything that is already there|
 
+>[!WARNING]
+>Currently, when you save a project, the paths to the sound files are saved as absolute paths. Until i fix this, if you want to share a project, make sure to edit the project's text file to make them relative.
+
 There are other keybindings that i didn't mention in this list.
 To see the full list, the keybindings are all defined as macros at the start of the `./src/main.c` file.
 You can customize them by just changing those macros and then recompiling the app.
@@ -233,4 +236,6 @@ We can now handle up to 3000 nodes! (There is a lot more to improve, but let's e
 
 ## Final Note
 
-If you got it working, i hope you enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and **thank you for your time!**
+If you've managed to get it working, i hope you've enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles. 
+
+**Thank you for your time!**
