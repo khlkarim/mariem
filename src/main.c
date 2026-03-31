@@ -543,27 +543,58 @@ void handle_key_bindings(AppState *app) {
 
   state = keyboard_key_states[KEYBINDING_DELETE_SELECTED];
   if (state == PRESSED) {
-    if (app->selectedNodeId != NIL) {
-      for (int i = 1; i < entityManager->count; i++) {
-        Entity *e = get_entity(entityManager, i);
+    if (
+        app->inputMode == INPUT_MODE_INITIALIZE ||
+        app->inputMode == INPUT_MODE_PLAYING) {
+      if (app->selectedNodeId != NIL) {
+        for (int i = 1; i < entityManager->count; i++) {
+          Entity *e = get_entity(entityManager, i);
 
-        if (
-            e->type == ENTITY_TYPE_LINK &&
-            (e->edgeA == app->selectedNodeId || e->edgeB == app->selectedNodeId)) {
+          if (
+              e->type == ENTITY_TYPE_LINK &&
+              (e->edgeA == app->selectedNodeId || e->edgeB == app->selectedNodeId)) {
 
-          if (i == app->selectedLinkId) {
-            app->selectedNodeId = NIL;
+            if (i == app->selectedLinkId) {
+              app->selectedLinkId = NIL;
+            }
+
+            delete_entity(entityManager, i);
           }
-
-          delete_entity(entityManager, i);
         }
-      }
 
-      delete_entity(entityManager, app->selectedNodeId);
-      app->selectedNodeId = NIL;
-    } else if (app->selectedLinkId) {
-      delete_entity(entityManager, app->selectedLinkId);
-      app->selectedLinkId = NIL;
+        delete_entity(entityManager, app->selectedNodeId);
+        app->selectedNodeId = NIL;
+      } else if (app->selectedLinkId != NIL) {
+        delete_entity(entityManager, app->selectedLinkId);
+        app->selectedLinkId = NIL;
+      }
+    } else if (
+        app->inputMode == INPUT_MODE_ASSERT ||
+        app->inputMode == INPUT_MODE_PERFORM) {
+      // you can only delete nodes (you can't select other links)
+      // if the node you want to delete is an edge of the currently focused link
+      // they both get delete and you are brought back to Initialize mode
+
+      if (app->selectedNodeId != NIL) {
+        for (int i = 1; i < entityManager->count; i++) {
+          Entity *e = get_entity(entityManager, i);
+
+          if (
+              e->type == ENTITY_TYPE_LINK &&
+              (e->edgeA == app->selectedNodeId || e->edgeB == app->selectedNodeId)) {
+
+            if (i == app->selectedLinkId) {
+              app->selectedLinkId = NIL;
+              app->inputMode = INPUT_MODE_INITIALIZE;
+            }
+
+            delete_entity(entityManager, i);
+          }
+        }
+
+        delete_entity(entityManager, app->selectedNodeId);
+        app->selectedNodeId = NIL;
+      }
     }
 
     keyboard_key_states[KEYBINDING_DELETE_SELECTED] = RELEASED;
@@ -1040,6 +1071,7 @@ void link_mouse_event_handler(AppState *app) {
         set_initial_state(entityManager, clickedLinkId, brush->firstChild);
       } else {
         app->selectedLinkId = clickedLinkId;
+        app->selectedNodeId = NIL;
       }
     } else if (mode == INPUT_MODE_ASSERT) {
       set_assert_state(entityManager, selectedLinkId, clickedLinkId, brush->firstChild);
@@ -1050,6 +1082,7 @@ void link_mouse_event_handler(AppState *app) {
         entityManager->currState[clickedLinkId] = brush->firstChild;
       } else {
         app->selectedLinkId = clickedLinkId;
+        app->selectedNodeId = NIL;
       }
     }
   } else {
@@ -1283,6 +1316,12 @@ void node_mouse_event_handler(AppState *app) {
         // and a link gets created between it and the previously selected node
         create_link(app, app->selectedNodeId, clickedNode);
         app->selectedNodeId = clickedNode;
+
+        if (
+            app->inputMode == INPUT_MODE_INITIALIZE ||
+            app->inputMode == INPUT_MODE_PLAYING) {
+          app->selectedLinkId = NIL;
+        }
       } else {
         set_node_resource_using_brush(app, clickedNode);
       }
@@ -3436,8 +3475,8 @@ void delete_entity(EntityManager *entityManager, EntityId id) {
       }
     }
   } else if (deleteMe->type == ENTITY_TYPE_LINK) {
-    entityManager->linkage[deleteMe->edgeA * MAX_ENTITIES + deleteMe->edgeB] = oui_max(0, entityManager->linkage[deleteMe->edgeA * MAX_ENTITIES + deleteMe->edgeB]);
-    entityManager->linkage[deleteMe->edgeB * MAX_ENTITIES + deleteMe->edgeA] = oui_max(0, entityManager->linkage[deleteMe->edgeB * MAX_ENTITIES + deleteMe->edgeA]);
+    entityManager->linkage[deleteMe->edgeA * MAX_ENTITIES + deleteMe->edgeB] = oui_max(0, entityManager->linkage[deleteMe->edgeA * MAX_ENTITIES + deleteMe->edgeB] - 1);
+    entityManager->linkage[deleteMe->edgeB * MAX_ENTITIES + deleteMe->edgeA] = oui_max(0, entityManager->linkage[deleteMe->edgeB * MAX_ENTITIES + deleteMe->edgeA] - 1);
   }
 
   memset(&(entityManager->entities[id]), 0, sizeof(Entity));
