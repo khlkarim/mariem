@@ -73,7 +73,7 @@ Well, have you ever tried using **FlStudio**?
 Its a music production tool, more specifically a Digital Audio Interface (DAW), that lets you produce, mix, and master music.
 And if you have ever tried it, you are probably familiar with its interface:
 
-![FlStudio Interface](https://github.com/user-attachments/assets/4d23a82c-734f-45fa-a82d-3fd4c7ba8b7f)
+![Fl Studio Interface](https://github.com/user-attachments/assets/5cb31a2d-7fb8-4a92-9a80-70949d827356)
 
 Its a great tool, but oh my is the interface **intimidating**! And it has so much stuff, more than i could ever need or want.
 
@@ -230,10 +230,8 @@ Here is how the call-graph ended up after implementing Sweep and Prune:
 
 We can now handle up to 3000 nodes! (There is a lot more to improve, but let's enjoy it for now)
 
-[3000 nodes](https://github.com/user-attachments/assets/f4141fb3-3e4c-40f3-afee-5818531a347f)
+[3000 nodes](https://github.com/user-attachments/assets/642c3f07-6411-47b2-8b39-756477d0f6b9)
 
 ## Final Note
 
-If you've managed to get it working, i hope you've enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles. 
-
-**Thank you for your time!**
+If you've managed to get it working, i hope you've enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and **Thank you for your time!**
