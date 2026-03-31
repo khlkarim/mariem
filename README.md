@@ -116,9 +116,6 @@ There are 4 modes:
 
 ![Perform mode](https://github.com/user-attachments/assets/ac3b4893-7195-4d9b-ad63-99ae5da22589)
 
->[!WARNING]
->If you press A or P without selecting a link, nothing will happen. (which is bad UX, and i will fix this as soon as i can)
-
 **Playing mode**: If you press SPACE the graph traversal will start. In this mode, you can still edit the active state of the graph and change to Assert and Perform modes without stopping the audio player.
 
 ![Playing mode](https://github.com/user-attachments/assets/2c53daaf-ca37-483c-a0d9-2a83eb3a3512)

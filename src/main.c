@@ -604,20 +604,30 @@ void handle_key_bindings(AppState *app) {
   if (state == PRESSED) {
     if (app->selectedLinkId != NIL) {
       app->inputMode = INPUT_MODE_ASSERT;
-      keyboard_key_states[KEYBINDING_ASSERT_MODE] = RELEASED;
     } else {
       nob_log(NOB_WARNING, "Can't enter ASSERT MODE without selecting a link");
+      tinyfd_messageBox(
+          "Hands up!",
+          "Cant enter ASSERT MODE without selecting a link.",
+          "ok", "warning", 1);
     }
+
+    keyboard_key_states[KEYBINDING_ASSERT_MODE] = RELEASED;
   }
 
   state = keyboard_key_states[KEYBINDING_PERFORM_MODE];
   if (state == PRESSED) {
     if (app->selectedLinkId != NIL) {
       app->inputMode = INPUT_MODE_PERFORM;
-      keyboard_key_states[KEYBINDING_PERFORM_MODE] = RELEASED;
     } else {
       nob_log(NOB_WARNING, "Can't enter PERFORM MODE without selecting a link");
+      tinyfd_messageBox(
+          "Hands up!",
+          "Cant enter PERFORM MODE without selecting a link.",
+          "ok", "warning", 1);
     }
+
+    keyboard_key_states[KEYBINDING_PERFORM_MODE] = RELEASED;
   }
 
   state = keyboard_key_states[KEYBINDING_INITIALIZE_MODE];
@@ -2808,7 +2818,7 @@ void draw_resource_manager(AppState *app) {
       oui_text_to_rectangle(ouiContext, &text, &hitBox);
     }
 
-    char dots[3];
+    char dots[3] = {0};
     if (strlen(text.content) > 3 && text.content != resource->buffer) {
       dots[0] = text.content[0];
       dots[1] = text.content[1];
