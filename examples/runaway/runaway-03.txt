@@ -1,8 +1,8 @@
-BPM 180.000000R 237.000000 51.000000 59.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/kick1.wav
-R 53.000000 132.000000 228.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/hats1.wav
-R 46.000000 194.000000 126.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/hats2.wav
-R 192.000000 97.000000 203.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/kick2.wav
-R 255.000000 163.000000 72.000000 255.000000 ./data/runaway-soundboard/cleaned-drums/boomboom.wav
+BPM 180.000000R 237.000000 51.000000 59.000000 255.000000 ./data/runaway-soundboard/drums/kick1.wav
+R 53.000000 132.000000 228.000000 255.000000 ./data/runaway-soundboard/drums/hats1.wav
+R 46.000000 194.000000 126.000000 255.000000 ./data/runaway-soundboard/drums/hats2.wav
+R 192.000000 97.000000 203.000000 255.000000 ./data/runaway-soundboard/drums/kick2.wav
+R 255.000000 163.000000 72.000000 255.000000 ./data/runaway-soundboard/drums/boomboom.wav
 N 1 1
 N 2 0
 N 4 0
