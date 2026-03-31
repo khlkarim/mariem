@@ -81,7 +81,7 @@ This is what pushed me to find a simpler way of making music, something that jus
 
 But for a while i couldn't find an intuitive way of doing this. Until last semester, when i took a systems modeling course, it served as an introduction to topics like: **Petri nets**, **Colored Petri Nets** and **the B-method**. 
 
-And there and then it finally clicked! What if we took the **colored directed graph** structure of a CPT, made the firing of the transitions **deterministic** and then considered every transition as an operation of a B-Machine, having its own **pre-condition** and **post-condition**...
+And there and then it finally clicked! What if we took the **colored directed graph** structure of a CPN, made the firing of the transitions **deterministic** and then considered every transition as an operation of a B-Machine, having its own **pre-condition** and **post-condition**...
 
 Well, if we put all of this together with some sugar, spice, and everything nice, we'll get mariem!
 
@@ -92,7 +92,7 @@ Well, if we put all of this together with some sugar, spice, and everything nice
 As you are building the graph, you will be able to select a subset of the nodes as starting nodes, from which the graph traversal will begin. 
 You can do this by clicking a node to select it, and then pressing H to make it a starting node.
 
-On each beat, and for every currently visited nodes, we check the pre-condition of every link connected to it, if that pre-condition is valid, the transition gets triggered:
+On each beat, and for every currently visited node, we check the pre-condition of every link connected to it, if that pre-condition is valid, the transition gets triggered:
 
 ![Starting nodes](https://github.com/user-attachments/assets/dfdbd9f9-d78b-497c-bc76-d17a6ef6da43)
 
@@ -117,7 +117,7 @@ There are 4 modes:
 ![Perform mode](https://github.com/user-attachments/assets/ac3b4893-7195-4d9b-ad63-99ae5da22589)
 
 >[!WARNING]
->If you press A or P without selecting a link nothing will happen. (which is bad UX, and i will fix this as soon as i can)
+>If you press A or P without selecting a link, nothing will happen. (which is bad UX, and i will fix this as soon as i can)
 
 **Playing mode**: If you press SPACE the graph traversal will start. In this mode, you can still edit the active state of the graph and change to Assert and Perform modes without stopping the audio player.
 
@@ -218,7 +218,8 @@ Why? Well, checking if two complex objects are colliding is not a cheap operatio
 The Sweep and Prune algorithm is a broad phase algorithm. How does it eliminate unlikely candidates?
 It considers the bounding box of each object in the system, and checks for collisions between those boxes. To check if two boxes collide, we just need to make sure that they intersect on both the x and y axes. Since the axes are independent, this problem can be reduced to checking for intersections between intervals on a line: [A Leetcode problem](https://leetcode.com/problems/merge-intervals/description/) that can be solved in O(n*log(n)) by just sorting the intervals and then checking for intersections between the neighboring ones.
 
-Step 1: We have to sort the boxes on the x-axis, then for each entity, we have to put the ones that intersect with it in a list: L
+Step 1: We have to sort the boxes on the x-axis, then for each entity, we have to put the ones that intersect with it in a list: L.
+
 Step 2: We have to sort the boxes on the y-axis, then for each entity, we remove from L the entities that don't intersect with it in the y-axes and keep the others. 
 After this, we would end up with the entities that pass the broad phase.
 
@@ -234,4 +235,4 @@ We can now handle up to 3000 nodes! (There is a lot more to improve, but let's e
 
 ## Final Note
 
-If you've managed to get it working, i hope you've enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and **Thank you for your time!**
+If you've managed to get it working, i hope you've enjoyed playing around with the project. If you haven't, i would really appreciate if you report any issues you might have encountered, and i will try my best to get them fixed in time so that others don't get stuck on the same hurdles, and **thank you for your time!**
