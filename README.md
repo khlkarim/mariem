@@ -1,6 +1,6 @@
 # mariem - A Visual Modeling Language
 
-[![Watch the demo](https://img.youtube.com/vi/rmJHtfqorVU/maxresdefault.jpg)](https://youtu.be/rmJHtfqorVU)
+[![Watch the demo](https://img.youtube.com/vi/OVQGVA9cIro/maxresdefault.jpg)](https://youtu.be/OVQGVA9cIro)
 
 ## Building the executable
 
@@ -28,9 +28,8 @@ If you face any issues building GLFW, [their official guide](https://www.glfw.or
 Now, you just have to compile the nob executable and run it to build the main project: 
 
 ```bash
-# At the project's root 
-mkdir build
-cc -o ./build/nob ./nob.c
+mkdir build # at the project's root
+cc -o ./build/nob ./nob.c # where cc is your favorite c compiler
 ./build/nob # this will compile the project and create: ./build/main
 
 # To compile a debug build of the project:
