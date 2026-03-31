@@ -72,7 +72,7 @@ Well, have you ever tried using **FlStudio**?
 Its a music production tool, more specifically a Digital Audio Interface (DAW), that lets you produce, mix, and master music.
 And if you have ever tried it, you are probably familiar with its interface:
 
-![FlStudio interface](./assets/flstudio.jpg)
+![FlStudio Interface](https://github.com/user-attachments/assets/4d23a82c-734f-45fa-a82d-3fd4c7ba8b7f)
 
 Its a great tool, but oh my is the interface **intimidating**! And it has so much stuff, more than i could ever need or want.
 
@@ -84,7 +84,7 @@ And there and then it finally clicked! What if we took the **colored directed gr
 
 Well, if we put all of this together with some sugar, spice, and everything nice, we'll get mariem!
 
-![Sugar, spice and everything nice!](./assets/sugar-spice-everything-nice.png)
+![Sugar, spice and everything nice!](https://github.com/user-attachments/assets/af7af567-364e-4e78-8467-4e2aaa791b08)
 
 **But how are we going to add determinism to the firing of the transitions?**
 
@@ -163,7 +163,7 @@ We have two notes: a high note and a low note => 2 colors.
 From beat 3 to beat 4, we transition from a low note to a high note, so lets make a link for that.
 This link will assert that its starting edge is a low note and will perform setting the destination edge to a high note:
 
-![Low to high transition](./assets/low-to-high.gif)
+![Low to high transition](https://github.com/user-attachments/assets/d1ccb384-87cc-4632-847c-0c6245ccc1c3)
 
 Between the other two beats the note does not change, **do we need a transition for them?**
 
@@ -187,7 +187,7 @@ Cool! Yes, we are still at 16 links but we now only have 12 nodes.
 Now to the key observation that will get us to just 6 nodes: 
 Lets consider these nodes: 
 
-![Annotated piano](./assets/annotated-notes.png)
+![Annotated notes](https://github.com/user-attachments/assets/abee2824-92b6-4a02-9a08-d678838e0e3e)
 
 What makes a pair special compared to the other pairs?
 Well, nothing! When a pair is being traversed, the others are inactive.
@@ -203,11 +203,11 @@ You can play around with the drum sequence and see in how little entities you ca
 # Implementation detail: The physics system
 To me, the coolest part of the implementation, was implementing collision detection!
 
-![Dora the explorer](./assets/dora-the-explorer.jpg)
+![Dora the explorer](https://github.com/user-attachments/assets/b4bd55a0-a613-4282-8cae-bf4a6a5288fc)
 
 The first version was the brute force approach of iterating over all the possible pairs of the nodes and checking if they are colliding using the formula: $||c_1 - c_2|| \le r_1 + r_2$. But this approach was too slow, it was bearly handling 600 nodes:
 
-![Bruteforce Call Graph](./assets/call-graph-bad.png)
+![Bruteforce Call Graph](https://github.com/user-attachments/assets/23eadf5f-854e-4b9b-b0cd-50dc11551626)
 
 After reading the [collision detection wikipedia page](https://en.wikipedia.org/wiki/Collision_detection), which compares the applicability of different detection algorithms. I stealed for the Sweep and Prune algorithm, because it was the simplest and best fit for our limited use case.
 
@@ -225,11 +225,11 @@ But in step 2, since we are already iterating over the entities that intersect i
 
 Here is how the call-graph ended up after implementing Sweep and Prune:
 
-![Sweep and prune call graph](./assets/call-graph-good.png)
+![Sweep and prune call graph](https://github.com/user-attachments/assets/9a3690c8-8e26-4db9-a277-c1834081a57f)
 
 We can now handle up to 3000 nodes! (There is a lot more to improve, but let's enjoy it for now)
 
-[3000 nodes](https://github.com/user-attachments/assets/509548a6-08fe-4364-8e22-d4608ad232f0)
+[3000 nodes](https://github.com/user-attachments/assets/f4141fb3-3e4c-40f3-afee-5818531a347f)
 
 ## Final Note
 
