@@ -39,12 +39,8 @@ cc -o ./build/nob ./nob.c # where cc is your favorite c compiler
 ./build/nob gen # This will create ./build/gen
 ```
 
-The above process should be platform independent, but i have only tested it on my linux machine.
-To test the windows build, i used mingw to cross-compile to windows and then ran the executable using wine. 
-It seemed to be working just fine, but the mingw-wine setup doesn't fully replicate the windows environment, so if you encounter any issues let me know.
-
 >[!WARNING]
->The projects in the `./examples` directory point to sound files that should exist in `./data`, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them to a github release.
+>The above process should be platform independent, but i have only tested it on my linux machine. To test the windows build, i used mingw to cross-compile to windows and then ran the executable using wine. It seemed to be working just fine, but the mingw-wine setup doesn't fully replicate the windows environment, so if you encounter any issues let me know.
 
 ## Usage 
 The interaction with the app is keyboard centric, these are the main keybindings that let you do stuff:
@@ -64,6 +60,9 @@ You can customize them by just changing those macros and then recompiling the ap
 
 To make sure that everything is set up correctly, you can pick a file from the examples directory and load it as a project.
 Pressing the space bar should make something happen.
+
+>[!WARNING]
+>The projects in the `./examples` directory point to sound files that should exist in `./data`, since these files would significantly inflate the size of the repo, i compressed them into a zip file and uploaded them [here](https://drive.google.com/file/d/1WjJifQdBB78LlJOsQPGhsAPZGIZZmTdZ/view?usp=sharing). If you download and unzip this folder in the project's root, the examples should work fine.
 
 ## Motivation
 **What is mariem? And why am i calling it a language?**
