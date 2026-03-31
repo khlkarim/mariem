@@ -245,7 +245,7 @@ void oui_context_init(OuiContext *ouiContext, OuiConfig *ouiConfig) {
   oui__glfw_create_window(ouiContext, ouiConfig);
   oui__freetype_load_font(ouiContext, ouiConfig);
   oui__initialize_gpu_objects(ouiContext, ouiConfig);
-  ouiContext->backgroundColor = ouiConfig->backgroundColor;
+  ouiContext->backgroundColor = ouiConfig == NULL ? OUI_DEFAULT_BACKGROUND_COLOR : ouiConfig->backgroundColor;
 }
 
 static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig) {
@@ -253,9 +253,9 @@ static void oui__glfw_create_window(OuiContext *ouiContext, OuiConfig *ouiConfig
     return;
   }
 
-  int windowWidth = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_WIDTH : ouiConfig->windowWidth;
-  int windowHeight = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_HEIGHT : ouiConfig->windowHeight;
-  char *windowTitle = ouiConfig == NULL ? OUI_DEFAULT_WINDOW_TITLE : ouiConfig->windowTitle;
+  int windowWidth = ouiConfig == NULL || ouiConfig->windowWidth == 0 ? OUI_DEFAULT_WINDOW_WIDTH : ouiConfig->windowWidth;
+  int windowHeight = ouiConfig == NULL || ouiConfig->windowHeight == 0 ? OUI_DEFAULT_WINDOW_HEIGHT : ouiConfig->windowHeight;
+  char *windowTitle = ouiConfig == NULL || ouiConfig->windowTitle == NULL ? OUI_DEFAULT_WINDOW_TITLE : ouiConfig->windowTitle;
 
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -1221,5 +1221,4 @@ static unsigned int oui__glfw_text_compile_shader_program(OuiText *text) {
 //----------------------------------------
 // Utils
 //----------------------------------------
-
 #endif // OUI_USE_GLFW
