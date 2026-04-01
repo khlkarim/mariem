@@ -76,20 +76,20 @@
 #define KEYBINDING_SHIFT GLFW_KEY_LEFT_SHIFT
 #define KEYBINDING_ESCAPE GLFW_KEY_ESCAPE
 
-#define KEYBINDING_CREATE_NODE GLFW_KEY_N
-#define KEYBINDING_DELETE_SELECTED GLFW_KEY_D
-#define KEYBINDING_SAVE_PROJECT GLFW_KEY_S
-#define KEYBINDING_LOAD_PROJECT GLFW_KEY_L
+#define KEYBINDING_CREATE_NODE 'n'
+#define KEYBINDING_DELETE_SELECTED 'd'
+#define KEYBINDING_SAVE_PROJECT 's'
+#define KEYBINDING_LOAD_PROJECT 'l'
 
-#define KEYBINDING_ASSERT_MODE GLFW_KEY_Q
-#define KEYBINDING_PERFORM_MODE GLFW_KEY_P
-#define KEYBINDING_INITIALIZE_MODE GLFW_KEY_I
+#define KEYBINDING_ASSERT_MODE 'a'
+#define KEYBINDING_PERFORM_MODE 'p'
+#define KEYBINDING_INITIALIZE_MODE 'i'
 #define KEYBINDING_PLAYING_MODE GLFW_KEY_SPACE
-#define KEYBINDING_PAUSE_PLAYER GLFW_KEY_W
+#define KEYBINDING_PAUSE_PLAYER 'w'
 
-#define KEYBINDING_TOGGLE_NEEDLE GLFW_KEY_H
-#define KEYBINDING_TOGGLE_PHYSICS GLFW_KEY_X
-#define KEYBINDING_TOGGLE_RESOURCE_MANAGER GLFW_KEY_M
+#define KEYBINDING_TOGGLE_NEEDLE 'h'
+#define KEYBINDING_TOGGLE_PHYSICS 'x'
+#define KEYBINDING_TOGGLE_RESOURCE_MANAGER 'm'
 
 #define KEYBINDING_PREV_PAGE GLFW_KEY_LEFT
 #define KEYBINDING_NEXT_PAGE GLFW_KEY_RIGHT
@@ -97,10 +97,14 @@
 #define NUM_KEYBOARD_KEYS (GLFW_KEY_LAST + 1)
 static int keyboard_key_states[NUM_KEYBOARD_KEYS] = {0};
 
+#define NUM_CODEPOINT_KEYS 128 // ASCII
+static int codepoint_key_states[NUM_CODEPOINT_KEYS] = {0};
+
 #define NUM_MOUSE_BUTTONS (GLFW_MOUSE_BUTTON_LAST + 1)
 static int mouse_button_states[NUM_MOUSE_BUTTONS] = {0};
 
 NtVec2f get_mouse_position(OuiContext *ouiContext);
+void character_callback(GLFWwindow *window, unsigned int codepoint);
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods);
 void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 // ------------------ Input Handling ------------------
@@ -436,6 +440,7 @@ void init(AppState *app) {
   };
 
   oui_context_init(ouiContext, &ouiConfig);
+  glfwSetCharCallback(ouiContext->window, character_callback);
   glfwSetKeyCallback(ouiContext->window, keyboard_key_callback);
   glfwSetMouseButtonCallback(ouiContext->window, mouse_button_callback);
   glfwSetInputMode(ouiContext->window, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
@@ -520,28 +525,28 @@ void handle_key_bindings(AppState *app) {
   Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
 
   int state;
-  state = keyboard_key_states[KEYBINDING_SAVE_PROJECT];
+  state = codepoint_key_states[KEYBINDING_SAVE_PROJECT];
   if (state == PRESSED) {
     save_project(app);
-    keyboard_key_states[KEYBINDING_SAVE_PROJECT] = RELEASED;
+    codepoint_key_states[KEYBINDING_SAVE_PROJECT] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_LOAD_PROJECT];
+  state = codepoint_key_states[KEYBINDING_LOAD_PROJECT];
   if (state == PRESSED) {
     load_project(app);
-    keyboard_key_states[KEYBINDING_LOAD_PROJECT] = RELEASED;
+    codepoint_key_states[KEYBINDING_LOAD_PROJECT] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_CREATE_NODE];
+  state = codepoint_key_states[KEYBINDING_CREATE_NODE];
   if (state == PRESSED) {
     create_node(app);
 
     if (keyboard_key_states[KEYBINDING_SHIFT] == OFF) {
-      keyboard_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
+      codepoint_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
     }
   }
 
-  state = keyboard_key_states[KEYBINDING_DELETE_SELECTED];
+  state = codepoint_key_states[KEYBINDING_DELETE_SELECTED];
   if (state == PRESSED) {
     if (
         app->inputMode == INPUT_MODE_INITIALIZE ||
@@ -597,10 +602,10 @@ void handle_key_bindings(AppState *app) {
       }
     }
 
-    keyboard_key_states[KEYBINDING_DELETE_SELECTED] = RELEASED;
+    codepoint_key_states[KEYBINDING_DELETE_SELECTED] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_ASSERT_MODE];
+  state = codepoint_key_states[KEYBINDING_ASSERT_MODE];
   if (state == PRESSED) {
     if (app->selectedLinkId != NIL) {
       app->inputMode = INPUT_MODE_ASSERT;
@@ -612,10 +617,10 @@ void handle_key_bindings(AppState *app) {
           "ok", "warning", 1);
     }
 
-    keyboard_key_states[KEYBINDING_ASSERT_MODE] = RELEASED;
+    codepoint_key_states[KEYBINDING_ASSERT_MODE] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_PERFORM_MODE];
+  state = codepoint_key_states[KEYBINDING_PERFORM_MODE];
   if (state == PRESSED) {
     if (app->selectedLinkId != NIL) {
       app->inputMode = INPUT_MODE_PERFORM;
@@ -626,14 +631,13 @@ void handle_key_bindings(AppState *app) {
           "Cant enter PERFORM MODE without selecting a link.",
           "ok", "warning", 1);
     }
-
-    keyboard_key_states[KEYBINDING_PERFORM_MODE] = RELEASED;
+    codepoint_key_states[KEYBINDING_PERFORM_MODE] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_INITIALIZE_MODE];
+  state = codepoint_key_states[KEYBINDING_INITIALIZE_MODE];
   if (state == PRESSED) {
     app->inputMode = INPUT_MODE_INITIALIZE;
-    keyboard_key_states[KEYBINDING_INITIALIZE_MODE] = RELEASED;
+    codepoint_key_states[KEYBINDING_INITIALIZE_MODE] = RELEASED;
   }
 
   state = keyboard_key_states[KEYBINDING_PLAYING_MODE];
@@ -650,7 +654,7 @@ void handle_key_bindings(AppState *app) {
     keyboard_key_states[KEYBINDING_PLAYING_MODE] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE];
+  state = codepoint_key_states[KEYBINDING_TOGGLE_NEEDLE];
   if (state == PRESSED) {
     if (app->selectedNodeId != NIL) {
       if (app->inputMode == INPUT_MODE_INITIALIZE) {
@@ -659,29 +663,29 @@ void handle_key_bindings(AppState *app) {
         entityManager->currNeedles[app->selectedNodeId] = entityManager->currNeedles[app->selectedNodeId] == YES ? NO : YES;
       }
     }
-    keyboard_key_states[KEYBINDING_TOGGLE_NEEDLE] = RELEASED;
+    codepoint_key_states[KEYBINDING_TOGGLE_NEEDLE] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_PAUSE_PLAYER];
+  state = codepoint_key_states[KEYBINDING_PAUSE_PLAYER];
   if (state == PRESSED) {
     if (app->graphInterpreterId != NIL) {
       Entity *graphInterpreter = get_entity(entityManager, app->graphInterpreterId);
       graphInterpreter->isPaused = graphInterpreter->isPaused == YES ? NO : YES;
       nob_log(NOB_INFO, "Paused");
     }
-    keyboard_key_states[KEYBINDING_PAUSE_PLAYER] = RELEASED;
+    codepoint_key_states[KEYBINDING_PAUSE_PLAYER] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_TOGGLE_PHYSICS];
+  state = codepoint_key_states[KEYBINDING_TOGGLE_PHYSICS];
   if (state == PRESSED) {
     app->togglePhysics = app->togglePhysics == ON ? OFF : ON;
-    keyboard_key_states[KEYBINDING_TOGGLE_PHYSICS] = RELEASED;
+    codepoint_key_states[KEYBINDING_TOGGLE_PHYSICS] = RELEASED;
   }
 
-  state = keyboard_key_states[KEYBINDING_TOGGLE_RESOURCE_MANAGER];
+  state = codepoint_key_states[KEYBINDING_TOGGLE_RESOURCE_MANAGER];
   if (state == PRESSED) {
     resourceManager->isVisible = resourceManager->isVisible == YES ? NO : YES;
-    keyboard_key_states[KEYBINDING_TOGGLE_RESOURCE_MANAGER] = RELEASED;
+    codepoint_key_states[KEYBINDING_TOGGLE_RESOURCE_MANAGER] = RELEASED;
   }
 
   state = keyboard_key_states[KEYBINDING_ESCAPE];
@@ -1079,7 +1083,7 @@ void link_mouse_event_handler(AppState *app) {
     if (mode == INPUT_MODE_INITIALIZE) {
       if (brush->firstChild != NIL) {
         set_initial_state(entityManager, clickedLinkId, brush->firstChild);
-      } else {
+      } else if (clickedLinkId != NIL) {
         app->selectedLinkId = clickedLinkId;
         app->selectedNodeId = NIL;
       }
@@ -1090,7 +1094,7 @@ void link_mouse_event_handler(AppState *app) {
     } else if (mode == INPUT_MODE_PLAYING) {
       if (brush->firstChild != NIL) {
         entityManager->currState[clickedLinkId] = brush->firstChild;
-      } else {
+      } else if (clickedLinkId != NIL) {
         app->selectedLinkId = clickedLinkId;
         app->selectedNodeId = NIL;
       }
@@ -3697,6 +3701,14 @@ NtVec2f get_mouse_position(OuiContext *ouiContext) {
       .y = -2 * (float)ypos + (float)screenHeight / 2};
 
   return mousePos;
+}
+
+void character_callback(GLFWwindow *window, unsigned int codepoint) {
+  if (codepoint <= NUM_CODEPOINT_KEYS) {
+    codepoint_key_states[codepoint] = PRESSED;
+  }
+
+  (void)window;
 }
 
 void mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
