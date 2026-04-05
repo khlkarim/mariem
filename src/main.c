@@ -76,7 +76,7 @@
 #define KEYBINDING_SHIFT GLFW_KEY_LEFT_SHIFT
 #define KEYBINDING_ESCAPE GLFW_KEY_ESCAPE
 
-#define KEYBINDING_CREATE_NODE 'n'
+#define KEYBINDING_CREATE_NODE GLFW_KEY_N
 #define KEYBINDING_DELETE_SELECTED 'd'
 #define KEYBINDING_SAVE_PROJECT 's'
 #define KEYBINDING_LOAD_PROJECT 'l'
@@ -181,7 +181,9 @@ typedef struct Entity {
   int isEnabled;
   int isInitialized;
   float hasBeenPlayingFor;
+
   ma_sound sound;
+  ma_result soundInitStatus;
 
   int page;
   int limit;
@@ -325,8 +327,8 @@ typedef struct AppState {
   EntityId selectedLinkId;
   // used for assert and perform statements
 
-  int used_sound_slots[MAX_SOUNDS_AT_ONCE];
-  ma_sound sound_slots[MAX_SOUNDS_AT_ONCE];
+  int countSounds;
+  ma_sound soundSlots[MAX_SOUNDS_AT_ONCE];
 } AppState;
 
 void clock_tick(Clock *clock);
@@ -537,12 +539,12 @@ void handle_key_bindings(AppState *app) {
     codepoint_key_states[KEYBINDING_LOAD_PROJECT] = RELEASED;
   }
 
-  state = codepoint_key_states[KEYBINDING_CREATE_NODE];
+  state = keyboard_key_states[KEYBINDING_CREATE_NODE];
   if (state == PRESSED) {
     create_node(app);
 
-    if (keyboard_key_states[KEYBINDING_SHIFT] == OFF) {
-      codepoint_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
+    if (keyboard_key_states[KEYBINDING_SHIFT] == RELEASED) {
+      keyboard_key_states[KEYBINDING_CREATE_NODE] = RELEASED;
     }
   }
 
@@ -558,7 +560,6 @@ void handle_key_bindings(AppState *app) {
           if (
               e->type == ENTITY_TYPE_LINK &&
               (e->edgeA == app->selectedNodeId || e->edgeB == app->selectedNodeId)) {
-
             if (i == app->selectedLinkId) {
               app->selectedLinkId = NIL;
             }
@@ -577,8 +578,8 @@ void handle_key_bindings(AppState *app) {
         app->inputMode == INPUT_MODE_ASSERT ||
         app->inputMode == INPUT_MODE_PERFORM) {
       // you can only delete nodes (you can't select other links)
-      // if the node you want to delete is an edge of the currently focused link
-      // they both get delete and you are brought back to Initialize mode
+      // if the node you want to delete is an edge of the currently selected link
+      // they both get deleted and you are brought back to Initialize mode
 
       if (app->selectedNodeId != NIL) {
         for (int i = 1; i < entityManager->count; i++) {
@@ -650,6 +651,12 @@ void handle_key_bindings(AppState *app) {
     } else {
       app->inputMode = INPUT_MODE_INITIALIZE;
       graphInterpreter->isEnabled = NO;
+
+      for (int i = 0; i < app->countSounds; i++) {
+        ma_sound_stop(&(app->soundSlots[i]));
+        ma_sound_uninit(&(app->soundSlots[i]));
+      }
+      app->countSounds = 0;
     }
     keyboard_key_states[KEYBINDING_PLAYING_MODE] = RELEASED;
   }
@@ -738,6 +745,7 @@ void resource_manager_mouse_event_handler(AppState *app) {
   }
 
   OuiContext *ouiContext = &(app->ouiContext);
+  ma_engine *audioEngine = &(app->audioEngine);
   EntityManager *entityManager = &(app->entityManager);
   Entity *brush = get_entity(entityManager, app->brushId);
   Entity *resourceManager = get_entity(entityManager, app->resourceManagerId);
@@ -827,6 +835,10 @@ void resource_manager_mouse_event_handler(AppState *app) {
           brush->firstChild = NIL;
         }
 
+        if (resource->soundInitStatus == MA_SUCCESS) {
+          ma_sound_uninit(&(resource->sound));
+        }
+
         remove_child(entityManager, app->resourceManagerId, resourceId);
         delete_entity(entityManager, resourceId);
         return;
@@ -876,6 +888,17 @@ void resource_manager_mouse_event_handler(AppState *app) {
         nob_log(NOB_INFO, "selected file: %s", fileName);
         if (fileName) {
           snprintf(resource->buffer, BUFFER_SIZE, "%s", fileName);
+          resource->soundInitStatus = ma_sound_init_from_file(
+              audioEngine,
+              fileName,
+              0,
+              NULL,
+              NULL,
+              &(resource->sound));
+
+          if (resource->soundInitStatus != MA_SUCCESS) {
+            nob_log(NOB_ERROR, "Failed to initialize sound");
+          }
         } else {
           resource->buffer[0] = '\0';
         }
@@ -1012,7 +1035,7 @@ EntityId get_clicked_link(AppState *app) {
 
       int gap = 10;
       int hasAnEvilTwin = 0;
-      for (int j = 0; j < entityManager->count; j++) {
+      for (int j = 1; j < entityManager->count; j++) {
         Entity *other = get_entity(entityManager, j);
 
         if (other->type == ENTITY_TYPE_LINK && e->edgeA == other->edgeB && e->edgeB == other->edgeA) {
@@ -1086,6 +1109,8 @@ void link_mouse_event_handler(AppState *app) {
       } else if (clickedLinkId != NIL) {
         app->selectedLinkId = clickedLinkId;
         app->selectedNodeId = NIL;
+      } else {
+        app->selectedLinkId = NIL;
       }
     } else if (mode == INPUT_MODE_ASSERT) {
       set_assert_state(entityManager, selectedLinkId, clickedLinkId, brush->firstChild);
@@ -1097,6 +1122,8 @@ void link_mouse_event_handler(AppState *app) {
       } else if (clickedLinkId != NIL) {
         app->selectedLinkId = clickedLinkId;
         app->selectedNodeId = NIL;
+      } else {
+        app->selectedLinkId = NIL;
       }
     }
   } else {
@@ -2010,10 +2037,9 @@ void process_graph(AppState *app) {
     }
 
     for (int i = 1; i < entityManager->count; i++) {
-      // the ring existed you, but no reentered
       if (
           // you are ON if someone entered you
-          // or you were ON and noone existed you
+          // or you were ON and noone exited you
           (entityManager->currNeedles[i] & 2) == 2 ||
           (entityManager->prevNeedles[i] == YES && (entityManager->currNeedles[i] & 1) == 0)) {
         entityManager->currNeedles[i] = YES;
@@ -2050,16 +2076,8 @@ void play_beat(AppState *app) {
         entityManager->currState[i] != NIL &&
         entityManager->currNeedles[i] == YES) {
       Entity *resource = get_entity(entityManager, entityManager->currState[i]);
-      // ma_engine_play_sound(audioEngine, resource->buffer, NULL);
-      /* ma_sound sound;
-       ma_result result;
 
-       result = ma_sound_init_copy(audioEngine, &(resource->sound), 0, NULL, &sound);
-       if (result == MA_SUCCESS) {
-         ma_sound_start(&resource->sound);
-       }*/
-
-      if (strlen(resource->buffer) > 0) {
+      if (resource->soundInitStatus == MA_SUCCESS) {
         nob_log(NOB_INFO, "Playing: %s", resource->buffer);
         miniaudio_play_sound_wrapper(app, &resource->sound);
       }
@@ -2243,7 +2261,11 @@ EntityId create_resource(AppState *app, char *fileName) {
   resource->type = ENTITY_TYPE_RESOURCE;
   if (fileName != NULL) {
     snprintf(resource->buffer, BUFFER_SIZE, "%s", fileName);
-    ma_sound_init_from_file(audioEngine, resource->buffer, MA_SOUND_FLAG_NO_PITCH | MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, NULL, &(resource->sound));
+
+    resource->soundInitStatus = ma_sound_init_from_file(audioEngine, resource->buffer, MA_SOUND_FLAG_NO_PITCH | MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, NULL, &(resource->sound));
+    if (resource->soundInitStatus != MA_SUCCESS) {
+      nob_log(NOB_ERROR, "Failed to initialize sound in create resource");
+    }
   }
   resource->color = (OuiColor){
       .r = rand() % 256,
@@ -3221,17 +3243,20 @@ void load_project(AppState *app) {
   windowWidth = oui_get_window_width(ouiContext);
   windowHeight = oui_get_window_height(ouiContext);
 
-  EntityId baseNodeId = NIL;
-  EntityId baseLinkId = NIL;
-  EntityId baseResourceId = NIL;
   ma_engine *audioEngine = &(app->audioEngine);
   EntityManager *entityManager = &(app->entityManager);
 
   int countNodes = 0;
+  EntityId loadedNodeIds[MAX_ENTITIES];
+
   int countLinks = 0;
+  EntityId loadedLinkIds[MAX_ENTITIES];
+
+  int countResources = 0;
+  EntityId loadedResourceIds[MAX_ENTITIES];
+
   int countAsserts = 0;
   int countPerforms = 0;
-  int countResources = 0;
 
   while (!feof(projectFile)) {
     fgets(line, size, projectFile);
@@ -3248,9 +3273,7 @@ void load_project(AppState *app) {
       }
     } else if (line[0] == 'R') {
       EntityId resourceId = create_entity(entityManager);
-      if (baseResourceId == NIL) {
-        baseResourceId = resourceId;
-      }
+      loadedResourceIds[++countResources] = resourceId;
 
       Entity *resource = get_entity(entityManager, resourceId);
 
@@ -3275,9 +3298,8 @@ void load_project(AppState *app) {
         // fgets keeps the newline at the end
         resource->buffer[strlen(resource->buffer) - 1] = '\0';
 
-        ma_result result;
-        result = ma_sound_init_from_file(audioEngine, resource->buffer, 0, NULL, NULL, &resource->sound);
-        if (result != MA_SUCCESS) {
+        resource->soundInitStatus = ma_sound_init_from_file(audioEngine, resource->buffer, 0, NULL, NULL, &resource->sound);
+        if (resource->soundInitStatus != MA_SUCCESS) {
           nob_log(NOB_ERROR, "FAILED TO INITILIZE AUDIO: %s", resource->buffer);
         }
       }
@@ -3285,12 +3307,9 @@ void load_project(AppState *app) {
       append_child(entityManager, app->resourceManagerId, resourceId);
       nob_log(NOB_INFO, "Loaded a resource: %d %f %f %f %f %s", resourceId, resource->color.r, resource->color.g, resource->color.b, resource->color.a, resource->buffer);
 
-      countResources++;
     } else if (line[0] == 'N') {
       EntityId nodeId = create_node(app);
-      if (baseNodeId == NIL) {
-        baseNodeId = nodeId;
-      }
+      loadedNodeIds[++countNodes] = nodeId;
 
       Entity *node = get_entity(entityManager, nodeId);
 
@@ -3316,7 +3335,7 @@ void load_project(AppState *app) {
       sscanf(line, "N %d %d", &resourceId, &isNeedle);
 
       if (resourceId != NIL) {
-        entityManager->initialState[nodeId] = resourceId + baseResourceId - 1;
+        entityManager->initialState[nodeId] = loadedResourceIds[resourceId];
       }
 
       if (isNeedle == YES) {
@@ -3324,46 +3343,40 @@ void load_project(AppState *app) {
       }
 
       nob_log(NOB_INFO, "Loaded a node: %d %d %d", nodeId, resourceId, isNeedle);
-
-      countNodes++;
     } else if (line[0] == 'L') {
       EntityId aId, bId, resourceId;
       sscanf(line, "L %d %d %d", &aId, &bId, &resourceId);
 
-      EntityId linkId = create_link(app, baseNodeId + aId - 1, baseNodeId + bId - 1);
-      if (baseLinkId == NIL) {
-        baseLinkId = linkId;
-      }
+      EntityId linkId = create_link(app, loadedNodeIds[aId], loadedNodeIds[bId]);
+      loadedLinkIds[++countLinks] = linkId;
 
       if (resourceId != NIL) {
-        entityManager->initialState[linkId] = resourceId + baseResourceId - 1;
+        entityManager->initialState[linkId] = loadedResourceIds[resourceId];
       }
-      nob_log(NOB_INFO, "Loaded a link: %d %d %d %d", linkId, aId + baseNodeId - 1, bId + baseNodeId - 1, resourceId + baseResourceId - 1);
-
-      countLinks++;
-    } else if (line[0] == 'A') { // TODO: clean me up
+      nob_log(NOB_INFO, "Loaded a link: %d %d %d %d", linkId, aId, bId, resourceId);
+    } else if (line[0] == 'A') {
       if (line[2] == 'N') {
         EntityId linkId, nodeId, resourceId;
         sscanf(line, "A N %d %d %d", &linkId, &nodeId, &resourceId);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+        entityManager->assertMatrix[(loadedLinkIds[linkId]) * MAX_ENTITIES + loadedNodeIds[nodeId]] = loadedResourceIds[resourceId];
 
       } else if (line[2] == 'L') {
         EntityId linkId, otherLinkId, resourceId;
         sscanf(line, "A L %d %d %d", &linkId, &otherLinkId, &resourceId);
-        entityManager->assertMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseLinkId - 1] = resourceId + baseResourceId - 1;
+        entityManager->assertMatrix[(loadedLinkIds[linkId]) * MAX_ENTITIES + loadedLinkIds[otherLinkId]] = loadedResourceIds[resourceId];
       }
 
       countAsserts++;
-    } else if (line[0] == 'P') { // TODO: clean me up
+    } else if (line[0] == 'P') {
       if (line[2] == 'N') {
         EntityId linkId, nodeId, resourceId;
         sscanf(line, "P N %d %d %d", &linkId, &nodeId, &resourceId);
-        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + nodeId + baseNodeId - 1] = resourceId + baseResourceId - 1;
+        entityManager->performMatrix[(loadedLinkIds[linkId]) * MAX_ENTITIES + loadedNodeIds[nodeId]] = loadedResourceIds[resourceId];
 
       } else if (line[2] == 'L') {
         EntityId linkId, otherLinkId, resourceId;
         sscanf(line, "P L %d %d %d", &linkId, &otherLinkId, &resourceId);
-        entityManager->performMatrix[(linkId + baseLinkId - 1) * MAX_ENTITIES + otherLinkId + baseLinkId - 1] = resourceId + baseResourceId - 1;
+        entityManager->performMatrix[(loadedLinkIds[linkId]) * MAX_ENTITIES + loadedLinkIds[otherLinkId]] = loadedResourceIds[resourceId];
       }
 
       countPerforms++;
@@ -3407,39 +3420,37 @@ EntityId create_entity(EntityManager *entityManager) {
       entityManager->count >= 1 &&
       entityManager->count <= MAX_ENTITIES);
 
+  EntityId id = NIL;
+  Entity *e = get_entity(entityManager, NIL);
+
   // reserve an empty slot
   for (int i = 1; i < entityManager->count; i++) {
-    Entity *e = &(entityManager->entities[i]);
+    e = &(entityManager->entities[i]);
 
     if (!e->used) {
       e->used = YES;
-      nob_log(NOB_INFO, "Created a new entity: reused an old slot (count = %d)", entityManager->count);
+      id = i;
 
-      return i;
+      nob_log(NOB_INFO, "Created a new entity: reused an old slot (count = %d)", entityManager->count);
+      break;
     }
   }
 
   // create a new slot
-  if (entityManager->count < MAX_ENTITIES) {
-    Entity *e = &(entityManager->entities[entityManager->count]);
+  if (entityManager->count < MAX_ENTITIES && id == NIL) {
+    e = &(entityManager->entities[entityManager->count]);
 
     e->used = YES;
+    id = entityManager->count;
     entityManager->count++;
-    nob_log(NOB_INFO, "Created a new entity: created a new slot (count = %d)", entityManager->count);
 
-    return entityManager->count - 1;
+    nob_log(NOB_INFO, "Created a new entity: created a new slot (count = %d)", entityManager->count);
   }
 
-  // buy more ram
-  return NIL;
+  return id;
 }
 
 Entity *get_entity(EntityManager *entityManager, EntityId id) {
-  /* assert(
-       entityManager != NULL &&
-       entityManager->count >= 1 &&
-       entityManager->count <= MAX_ENTITIES);*/
-
   if (
       id <= NIL ||
       id >= entityManager->count ||
@@ -3460,29 +3471,38 @@ void delete_entity(EntityManager *entityManager, EntityId id) {
     return;
   }
 
+  entityManager->currNeedles[id] = NO;
   entityManager->initNeedles[id] = NO;
-  entityManager->initialState[id] = 0;
-  for (int i = 0; i < entityManager->count; i++) {
-    entityManager->assertMatrix[id * MAX_ENTITIES + i] = 0;
-    entityManager->assertMatrix[i * MAX_ENTITIES + id] = 0;
 
-    entityManager->performMatrix[id * MAX_ENTITIES + i] = 0;
-    entityManager->performMatrix[i * MAX_ENTITIES + id] = 0;
+  entityManager->currState[id] = NIL;
+  entityManager->initialState[id] = NIL;
+
+  for (int i = 1; i < entityManager->count; i++) {
+    entityManager->assertMatrix[id * MAX_ENTITIES + i] = NIL;
+    entityManager->assertMatrix[i * MAX_ENTITIES + id] = NIL;
+
+    entityManager->performMatrix[id * MAX_ENTITIES + i] = NIL;
+    entityManager->performMatrix[i * MAX_ENTITIES + id] = NIL;
   }
 
   Entity *deleteMe = get_entity(entityManager, id);
   if (deleteMe->type == ENTITY_TYPE_RESOURCE) {
-    for (int i = 0; i < entityManager->count; i++) {
+    for (int i = 1; i < entityManager->count; i++) {
       if (entityManager->initialState[i] == id) {
         entityManager->initialState[i] = NIL;
       }
+
+      if (entityManager->currState[i] == id) {
+        entityManager->currState[i] = NIL;
+      }
     }
 
-    for (int i = 0; i < entityManager->count; i++) {
-      for (int j = 0; j < entityManager->count; j++) {
+    for (int i = 1; i < entityManager->count; i++) {
+      for (int j = 1; j < entityManager->count; j++) {
         if (entityManager->assertMatrix[i * MAX_ENTITIES + j] == id) {
           entityManager->assertMatrix[i * MAX_ENTITIES + j] = NIL;
         }
+
         if (entityManager->performMatrix[i * MAX_ENTITIES + j] == id) {
           entityManager->performMatrix[i * MAX_ENTITIES + j] = NIL;
         }
@@ -3727,37 +3747,55 @@ void keyboard_key_callback(GLFWwindow *window, int key, int scancode, int action
 }
 
 void miniaudio_play_sound_wrapper(AppState *app, ma_sound *sound) {
-  if (app == NULL) {
+  if (app == NULL || sound == NULL) {
     return;
   }
 
-  for (int i = 0; i < MAX_SOUNDS_AT_ONCE; i++) {
-    if (
-        app->used_sound_slots[i] == YES &&
-        !ma_sound_at_end(&app->sound_slots[i])) {
+  for (int i = 0; i < app->countSounds; i++) {
+    if (!ma_sound_at_end(&app->soundSlots[i])) {
       continue;
     }
 
-    if (app->used_sound_slots[i] == YES) {
-      ma_sound_uninit(&app->sound_slots[i]);
-    }
+    ma_sound_uninit(&(app->soundSlots[i]));
+    nob_log(NOB_INFO, "Reusing a sound slot");
 
-    app->used_sound_slots[i] = YES;
     ma_result result = ma_sound_init_copy(
         &app->audioEngine,
         sound,
         0,
         NULL,
-        &app->sound_slots[i]);
+        &app->soundSlots[i]);
 
     if (result != MA_SUCCESS) {
       nob_log(NOB_ERROR, "Failed to initialize sound");
       return;
     }
 
-    ma_sound_start(&app->sound_slots[i]);
+    nob_log(NOB_INFO, "starting sound");
+    ma_sound_start(&app->soundSlots[i]);
     return;
   }
 
-  nob_log(NOB_ERROR, "Sound wasn't played, sound slots are full");
+  if (app->countSounds >= MAX_SOUNDS_AT_ONCE) {
+    nob_log(NOB_ERROR, "Can't play sound, sound slots are full");
+    return;
+  }
+
+  nob_log(NOB_INFO, "Reserved a new sound slot");
+
+  app->countSounds++;
+  ma_result result = ma_sound_init_copy(
+      &app->audioEngine,
+      sound,
+      0,
+      NULL,
+      &app->soundSlots[app->countSounds - 1]);
+
+  if (result != MA_SUCCESS) {
+    nob_log(NOB_ERROR, "Failed to initialize sound");
+    return;
+  }
+
+  nob_log(NOB_INFO, "starting sound");
+  ma_sound_start(&app->soundSlots[app->countSounds - 1]);
 }
